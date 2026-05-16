@@ -22,6 +22,7 @@ import { fetchWeather, fetchLastYearWeather } from '../services/weather';
 import { fetchAnnualEvents } from '../services/events';
 import { enrichWithWiki } from '../services/wikipedia';
 import { saveRecentTrip, getRecentTrips, replaceRecentTrips } from '../utils/recentTrips';
+import { haversineKm } from '../utils/geo';
 import {
   deleteWishlist,
   ensureWishlistForDestination,
@@ -87,6 +88,7 @@ export function TripProvider({ children }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selectedPlaceId, setSelectedPlaceId] = useState(null);
+  const [selectedPlace, setSelectedPlace] = useState(null);
   const [wishlist, setWishlist] = useState(() =>
     typeof window === 'undefined' ? {} : getWishlist()
   );
@@ -124,6 +126,9 @@ export function TripProvider({ children }) {
   // a "Search this area" button for manual refresh if auto-refresh is off.
   const [viewportItems, setViewportItems] = useState(null); // null = use tabData
   const [viewportLoading, setViewportLoading] = useState(false);
+  // Ref mirrors to let switchTab read these without adding them to dep arrays
+  const viewportItemsRef = useRef(null);
+  const lastViewportParamsRef = useRef(null); // { lat, lng, radiusMeters }
 
   // Auth + cloud sync
   const { user, saveToCloud, loadFromCloud } = useAuth();
@@ -136,6 +141,9 @@ export function TripProvider({ children }) {
   const nearbyRequestSeq = useRef(0);
   const viewportRequestSeq = useRef(0);
   const tabRequestSeq = useRef({}); // per-tab seqs to handle stale tab fetches
+  // Radius derived from geocode viewport — scales place searches to match the
+  // actual size of the searched region. Reset to 20km default on each search.
+  const searchRadiusRef = useRef(20000);
   // Mirror of tabData in a ref so callbacks can read the freshest value
   // without taking tabData as a dependency (which would thrash render).
   const tabDataRef = useRef({
@@ -232,7 +240,8 @@ export function TripProvider({ children }) {
         const items = await fetcher({
           destination: localDest,
           lat: localCoords.lat,
-          lng: localCoords.lng
+          lng: localCoords.lng,
+          radiusMeters: searchRadiusRef.current
         });
         if (tabRequestSeq.current[tabKey] !== seq) return; // stale
         writeTabData((prev) => ({ ...prev, [tabKey]: items }));
@@ -266,6 +275,26 @@ export function TripProvider({ children }) {
       setSelectedPlaceId(null);
       // City-wide path: lazy-load the tab's data
       fetchTabIfNeeded(tabKey);
+
+      // Viewport-mode path: if the user has panned the map, viewportItems holds
+      // data for the OLD tab. Re-fetch immediately for the new tab so the list
+      // doesn't freeze on stale data. Uses refs to avoid stale closures.
+      if (viewportItemsRef.current !== null && lastViewportParamsRef.current && TAB_KEYS.includes(tabKey)) {
+        const { lat, lng, radiusMeters } = lastViewportParamsRef.current;
+        const seq = ++viewportRequestSeq.current;
+        setViewportLoading(true);
+        fetchPlacesInViewport({ lat, lng, radiusMeters, category: tabKey })
+          .then((items) => {
+            if (seq !== viewportRequestSeq.current) return;
+            viewportItemsRef.current = items;
+            setViewportItems(items);
+          })
+          .catch((err) => console.warn('Viewport tab re-fetch failed:', err))
+          .finally(() => {
+            if (seq === viewportRequestSeq.current) setViewportLoading(false);
+          });
+      }
+
       // Nearby-mode path: if this category isn't pre-fetched yet, fetch it now
       if (nearbyAnchor && TAB_KEYS.includes(tabKey) && !nearbyItems[tabKey]) {
         const seq = nearbyRequestSeq.current;
@@ -284,6 +313,11 @@ export function TripProvider({ children }) {
     },
     [fetchTabIfNeeded, nearbyAnchor, nearbyItems]
   );
+
+  // Ref mirror so selectPlace can call the latest switchTab without adding it
+  // as a dependency (switchTab changes whenever nearbyAnchor/nearbyItems change)
+  const switchTabRef = useRef(null);
+  switchTabRef.current = switchTab;
 
   // ---- Main search --------------------------------------------------------
 
@@ -340,6 +374,18 @@ export function TripProvider({ children }) {
       try {
         const geo = await geocodeDestination(dest);
         if (myReq !== requestSeq.current) return;
+
+        // Compute search radius from the geocode bounding box so that a state
+        // like Meghalaya gets a radius matching its real extent (~100–150 km)
+        // rather than the hardcoded 20 km that left outlier markers scattered.
+        // Clamp: 5 km minimum (tiny towns), 300 km maximum (large countries).
+        if (geo.viewportNE && geo.viewportSW) {
+          const diagKm = haversineKm(geo.viewportNE, geo.viewportSW);
+          searchRadiusRef.current = Math.min(300000, Math.max(5000, Math.round((diagKm / 2) * 1000)));
+        } else {
+          searchRadiusRef.current = 20000;
+        }
+
         setCoords(geo);
         setWishlist(
           ensureWishlistForDestination({
@@ -351,7 +397,7 @@ export function TripProvider({ children }) {
         // Phase 1 (in parallel): current weather + activities (default tab)
         const [w, acts] = await Promise.all([
           fetchWeather({ lat: geo.lat, lng: geo.lng, dateISO: dt }),
-          fetchTopActivities({ destination: dest, lat: geo.lat, lng: geo.lng })
+          fetchTopActivities({ destination: dest, lat: geo.lat, lng: geo.lng, radiusMeters: searchRadiusRef.current })
         ]);
         if (myReq !== requestSeq.current) return;
 
@@ -364,14 +410,18 @@ export function TripProvider({ children }) {
         }
 
         // Phase 2 (background, non-blocking): last-year weather + annual events
-        // + wiki for activities. Each is independently caught so one failure
-        // doesn't sink the others. The outer .catch is a final safety net.
+        // + wiki for activities + remaining 3 categories for multi-layer map.
+        // Each is independently caught so one failure doesn't sink the others.
+        const r = searchRadiusRef.current;
         Promise.allSettled([
           fetchLastYearWeather({ lat: geo.lat, lng: geo.lng, dateISO: dt }),
           fetchAnnualEvents(dest, dt),
-          enrichWithWiki(acts, dest)
+          enrichWithWiki(acts, dest),
+          fetchTopRestaurants({ destination: dest, lat: geo.lat, lng: geo.lng, radiusMeters: r }),
+          fetchTopNatureUnique({ destination: dest, lat: geo.lat, lng: geo.lng, radiusMeters: r }),
+          fetchHiddenGems({ destination: dest, lat: geo.lat, lng: geo.lng, radiusMeters: r })
         ])
-          .then(([lywRes, evRes, enrichedRes]) => {
+          .then(([lywRes, evRes, enrichedRes, restsRes, natRes, gemsRes]) => {
             if (myReq !== requestSeq.current) return;
             if (lywRes.status === 'fulfilled' && lywRes.value) {
               setLastYearWeather(lywRes.value);
@@ -382,6 +432,11 @@ export function TripProvider({ children }) {
             if (enrichedRes.status === 'fulfilled' && enrichedRes.value) {
               writeTabData((prev) => ({ ...prev, activities: enrichedRes.value }));
             }
+            const extra = {};
+            if (restsRes.status === 'fulfilled' && restsRes.value) extra.restaurants = restsRes.value;
+            if (natRes.status === 'fulfilled' && natRes.value) extra.nature = natRes.value;
+            if (gemsRes.status === 'fulfilled' && gemsRes.value) extra.gems = gemsRes.value;
+            if (Object.keys(extra).length) writeTabData((prev) => ({ ...prev, ...extra }));
           })
           .catch((err) => console.warn('Phase 2 enrichment error:', err));
       } catch (e) {
@@ -403,9 +458,12 @@ export function TripProvider({ children }) {
 
   // ---- Selection (cross-tab) ---------------------------------------------
 
-  const selectPlace = useCallback((place) => {
+  const selectPlace = useCallback((place, category) => {
+    // Switch tab first (before setting selectedPlaceId) so React batches both
+    // state updates in one render — detail card finds place in the correct tab.
+    if (place && category) switchTabRef.current?.(category);
     setSelectedPlaceId(place?.placeId ?? null);
-    // Clear any active hotel highlight when picking a regular place
+    setSelectedPlace(place ?? null);
     setSelectedHotelId(null);
     if (place) {
       window.dispatchEvent(
@@ -418,6 +476,7 @@ export function TripProvider({ children }) {
           }
         })
       );
+      window.dispatchEvent(new CustomEvent('travelapp:openPlaces'));
     }
   }, []);
 
@@ -568,6 +627,8 @@ export function TripProvider({ children }) {
     // Also clear any stale viewport-mode data so the user lands cleanly
     // back on city tabData rather than on a previous pan's results.
     viewportRequestSeq.current++;
+    viewportItemsRef.current = null;
+    lastViewportParamsRef.current = null;
     setViewportItems(null);
     setViewportLoading(false);
   }, []);
@@ -582,6 +643,7 @@ export function TripProvider({ children }) {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       if (nearbyAnchor) return;
 
+      lastViewportParamsRef.current = { lat, lng, radiusMeters: radiusMeters || 5000 };
       const seq = ++viewportRequestSeq.current;
       setViewportLoading(true);
 
@@ -593,6 +655,7 @@ export function TripProvider({ children }) {
           category: activeTab
         });
         if (seq !== viewportRequestSeq.current) return;
+        viewportItemsRef.current = items;
         setViewportItems(items);
       } catch (e) {
         if (seq !== viewportRequestSeq.current) return;
@@ -606,6 +669,7 @@ export function TripProvider({ children }) {
 
   const clearViewportItems = useCallback(() => {
     viewportRequestSeq.current++;
+    viewportItemsRef.current = null;
     setViewportItems(null);
     setViewportLoading(false);
   }, []);
@@ -656,6 +720,7 @@ export function TripProvider({ children }) {
       error,
       search,
       selectedPlaceId,
+      selectedPlace,
       selectPlace,
       wishlist,
       wishlistLists,
@@ -702,6 +767,7 @@ export function TripProvider({ children }) {
       error,
       search,
       selectedPlaceId,
+      selectedPlace,
       selectPlace,
       wishlist,
       wishlistLists,

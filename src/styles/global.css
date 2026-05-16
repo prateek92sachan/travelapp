@@ -207,6 +207,17 @@ input { font-family: inherit; }
   background: var(--bg-input);
   border-color: var(--text);
 }
+.btn-outline {
+  background: transparent;
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
+  box-shadow: none;
+}
+.btn-outline:hover:not(:disabled) {
+  background: var(--accent-soft);
+  transform: none;
+  box-shadow: none;
+}
 
 .icon-btn {
   background: var(--bg-elevated);
@@ -782,6 +793,12 @@ input { font-family: inherit; }
 .card-header > .row {
   flex-shrink: 0;
 }
+.card-header-middle {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
 .card-body {
   padding: 16px;
   flex: 1;
@@ -995,13 +1012,36 @@ input { font-family: inherit; }
 
 /* ---------- Map ---------- */
 .card.map-card {
-  overflow: clip; /* allow sticky card-header; clip still respects border-radius */
+  overflow: clip;
 }
-.map-card .card-header {
-  position: sticky;
+.map-floating-header {
+  position: absolute;
   top: 0;
-  z-index: 5;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 18px;
   background: var(--bg-elevated);
+  box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+  pointer-events: auto;
+}
+.map-floating-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.map-floating-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
 }
 .map-container {
   width: 100%;
@@ -1018,10 +1058,43 @@ input { font-family: inherit; }
   text-align: center;
   padding: 40px;
 }
-/* ---------- Map controls (floating panel) ---------- */
+/* ---------- Category pin toggles (card header inline) ---------- */
+.cat-toggle-panel {
+  display: flex;
+  gap: 2px;
+}
+.cat-toggle-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1.5px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  transition: border-color var(--transition), background var(--transition), opacity var(--transition), color var(--transition);
+}
+.cat-toggle-btn.off { opacity: 0.45; }
+.cat-toggle-btn.on  { opacity: 1; }
+.cat-toggle-btn:hover { opacity: 1; }
+
+/* Header right: category toggles + gear, inline */
+.map-header-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.map-gear-btn.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ---------- Map controls (floating panel — trigger lives in header) ---------- */
 .map-controls {
   position: absolute;
-  top: 12px;
+  top: 58px;
   right: 12px;
   z-index: 50;
   display: flex;
@@ -1486,9 +1559,15 @@ input { font-family: inherit; }
 }
 .wishlist-list-picker {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
   gap: 8px;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
 }
+.wishlist-list-picker::-webkit-scrollbar { display: none; }
 .wishlist-list-chip {
   align-items: center;
   background: var(--bg-input);
@@ -1557,6 +1636,106 @@ input { font-family: inherit; }
 .wishlist-delete-btn {
   flex-shrink: 0;
   padding: 7px 10px;
+}
+
+/* Wishlist list picker overlay (long-press) */
+.wishlist-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: flex-end;
+}
+.wishlist-picker-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+.wishlist-picker-panel {
+  position: relative;
+  width: 100%;
+  max-height: 55vh;
+  background: var(--bg-elevated);
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 16px;
+  overflow-y: auto;
+  display: grid;
+  gap: 6px;
+  animation: slide-up-panel 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.wishlist-picker-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.wishlist-picker-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition), background var(--transition);
+}
+.wishlist-picker-item.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.wishlist-picker-item:hover:not(.active) { border-color: var(--border-strong); }
+.wishlist-picker-item-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wishlist-picker-item-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Add place manually */
+.wishlist-add-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 8px 0;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  transition: opacity var(--transition);
+}
+.wishlist-add-trigger:hover { opacity: 0.75; }
+.wishlist-add-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  animation: fade-in 150ms ease-out;
+}
+.wishlist-add-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 .wishlist-card-list {
   display: grid;
@@ -1729,9 +1908,33 @@ input { font-family: inherit; }
 .detail-stat .k { font-size: 11px; color: var(--text-muted); }
 .detail-stat .v { font-size: 14px; font-weight: 600; }
 .detail-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 16px;
+}
+.detail-actions .btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+.detail-actions .detail-close-btn {
+  grid-column: 1 / -1;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 6px;
+  box-shadow: none;
+}
+.detail-actions .detail-close-btn:hover {
+  color: var(--text);
+  background: var(--bg-input);
+  transform: none;
+  box-shadow: none;
 }
 
 /* ---------- Spinner / loading ---------- */
@@ -2166,7 +2369,7 @@ input { font-family: inherit; }
     border: none;
     border-radius: 0;
     box-shadow: none;
-    overflow: visible;
+    overflow: hidden;
     display: flex;
     align-items: stretch;
   }

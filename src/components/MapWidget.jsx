@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Compass, Utensils, Leaf, Gem, Settings } from 'lucide-react';
 import { Map, Marker, useMap } from '@vis.gl/react-google-maps';
 import Card from './Card';
 import { useTrip } from '../hooks/useTrip';
@@ -9,22 +10,45 @@ import { haversineKm } from '../utils/geo';
 
 const PROXIMITY_KM = 2;
 const VIEWPORT_DEBOUNCE_MS = 600;
-// Don't auto-refresh unless the center moved at least this far. Prevents
-// micro-movement spam when the user is just inspecting an area.
 const VIEWPORT_MIN_MOVE_KM = 0.5;
 
+// Category metadata — colors match the tab icons in PlacesDrawer / TabbedPlacesWidget
+const CATEGORY_CONFIG = {
+  activities:  { color: '#f97316', label: 'Activities',  Icon: Compass  },
+  restaurants: { color: '#ef4444', label: 'Restaurants', Icon: Utensils },
+  nature:      { color: '#22c55e', label: 'Nature',      Icon: Leaf     },
+  gems:        { color: '#6366f1', label: 'Hidden gems', Icon: Gem      },
+};
+const CATEGORY_KEYS = Object.keys(CATEGORY_CONFIG);
+
 export default function MapWidget() {
-  const { coords, activeTabItems, hotels, hotelsOn, loading, mapType } = useTrip();
+  const { coords, hotels, hotelsOn, loading, mapType } = useTrip();
+
+  const [visibleCategories, setVisibleCategories] = useState({
+    activities: true,
+    restaurants: true,
+    nature: true,
+    gems: true
+  });
+  const [controlsOpen, setControlsOpen] = useState(false);
+
+  const toggleCategory = useCallback((cat) => {
+    setVisibleCategories((prev) => ({ ...prev, [cat]: !prev[cat] }));
+  }, []);
+  const toggleControls = useCallback(() => setControlsOpen((o) => !o), []);
+
+  useEffect(() => {
+    if (!controlsOpen) return;
+    function handlePointerDown(e) {
+      if (e.target.closest('.map-controls') || e.target.closest('.map-gear-btn')) return;
+      setControlsOpen(false);
+    }
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    return () => document.removeEventListener('pointerdown', handlePointerDown, true);
+  }, [controlsOpen]);
 
   return (
-    <Card
-      icon="🗺"
-      title="Map"
-      className="map-card"
-      bodyClassName="no-pad"
-      expandable={false}
-      extraHeader={<ViewportRefreshIndicator />}
-    >
+    <Card className="map-card" bodyClassName="no-pad" expandable={false}>
       {loading && !coords ? (
         <div className="map-placeholder">Locating destination…</div>
       ) : !coords ? (
@@ -33,34 +57,49 @@ export default function MapWidget() {
         <MapInner
           key={`${coords.lat.toFixed(4)}-${coords.lng.toFixed(4)}`}
           center={coords}
-          markers={activeTabItems}
           hotels={hotelsOn ? hotels : []}
           mapType={mapType}
+          visibleCategories={visibleCategories}
+          toggleCategory={toggleCategory}
+          controlsOpen={controlsOpen}
+          onToggleControls={toggleControls}
         />
       )}
     </Card>
   );
 }
 
-function MapInner({ center, markers, hotels, mapType }) {
+function MapInner({ center, hotels, mapType, visibleCategories, toggleCategory, controlsOpen, onToggleControls }) {
   const { theme } = useTheme();
   const {
+    tabData,
+    nearbyItems,
+    nearbyAnchor,
     selectedPlaceId,
     selectedHotelId,
-    nearbyAnchor,
     selectPlace,
     selectHotel
   } = useTrip();
 
-  // Anchor for proximity ring: prefer the active nearby anchor (if user is
-  // exploring "near this hotel"), else the selected hotel by id.
   const anchorHotel = useMemo(() => {
     if (nearbyAnchor) return nearbyAnchor;
     return hotels.find((h) => h.placeId === selectedHotelId) || null;
   }, [nearbyAnchor, hotels, selectedHotelId]);
 
+  // Source for each category: nearby-mode overrides city-wide data
+  const markersForCat = useCallback(
+    (cat) => (nearbyAnchor ? nearbyItems[cat] : tabData[cat]) || [],
+    [nearbyAnchor, nearbyItems, tabData]
+  );
+
   return (
     <div className="map-container">
+      <MapFloatingHeader
+        visibleCategories={visibleCategories}
+        onToggleCategory={toggleCategory}
+        controlsOpen={controlsOpen}
+        onToggleControls={onToggleControls}
+      />
       <Map
         defaultCenter={{ lat: center.lat, lng: center.lng }}
         defaultZoom={12}
@@ -80,16 +119,21 @@ function MapInner({ center, markers, hotels, mapType }) {
           zIndex={500}
         />
 
-        {markers.slice(0, 10).map((poi, i) => (
-          <MemoPOIMarker
-            key={poi.placeId}
-            poi={poi}
-            index={i}
-            anchor={anchorHotel}
-            isSelected={selectedPlaceId === poi.placeId}
-            onSelect={selectPlace}
-          />
-        ))}
+        {CATEGORY_KEYS.map((cat) =>
+          visibleCategories[cat]
+            ? markersForCat(cat).slice(0, 7).map((poi, i) => (
+                <MemoPOIMarker
+                  key={poi.placeId}
+                  poi={poi}
+                  index={i}
+                  category={cat}
+                  anchor={anchorHotel}
+                  isSelected={selectedPlaceId === poi.placeId}
+                  onSelect={selectPlace}
+                />
+              ))
+            : null
+        )}
 
         {hotels.map((hotel) => (
           <MemoHotelMarker
@@ -108,35 +152,92 @@ function MapInner({ center, markers, hotels, mapType }) {
         <ViewportWatcher centerLat={center.lat} centerLng={center.lng} />
       </Map>
 
-      <MapControlsPanel />
+      <MapControlsPanel open={controlsOpen} onToggle={onToggleControls} />
       <NearbyModeIndicator />
       <HotelInfoCard />
     </div>
   );
 }
 
+// ---- Floating header (rendered inside map-container for reliable painting) ---
+
+function MapFloatingHeader({ visibleCategories, onToggleCategory, controlsOpen, onToggleControls }) {
+  return (
+    <div className="map-floating-header">
+      <div className="map-floating-title">
+        <span aria-hidden>🗺</span>
+        <span>Map</span>
+      </div>
+      <div className="map-floating-center">
+        <ViewportRefreshIndicator />
+      </div>
+      <div className="map-header-right">
+        <CategoryTogglePanel visible={visibleCategories} onToggle={onToggleCategory} />
+        <button
+          type="button"
+          className={`cat-toggle-btn map-gear-btn ${controlsOpen ? 'on' : 'off'}`}
+          onClick={onToggleControls}
+          title={controlsOpen ? 'Hide map controls' : 'Show map controls'}
+          aria-pressed={controlsOpen}
+        >
+          <Settings size={15} strokeWidth={1.75} aria-hidden />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---- Category toggle overlay -------------------------------------------------
+
+function CategoryTogglePanel({ visible, onToggle }) {
+  return (
+    <div className="cat-toggle-panel">
+      {CATEGORY_KEYS.map((cat) => {
+        const { color, label, Icon } = CATEGORY_CONFIG[cat];
+        const on = visible[cat];
+        return (
+          <button
+            key={cat}
+            type="button"
+            className={`cat-toggle-btn ${on ? 'on' : 'off'}`}
+            style={on ? { borderColor: color + '55', background: color + '18' } : undefined}
+            onClick={() => onToggle(cat)}
+            title={`${on ? 'Hide' : 'Show'} ${label}`}
+            aria-pressed={on}
+          >
+            <Icon
+              size={15}
+              strokeWidth={1.75}
+              color={on ? color : undefined}
+              aria-hidden
+            />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ---- Markers (memoized for performance) ----------------------------------
 
-function POIMarker({ poi, index, anchor, isSelected, onSelect }) {
+function POIMarker({ poi, index, anchor, isSelected, onSelect, category }) {
   const isOutsideRing = anchor ? haversineKm(anchor, poi) > PROXIMITY_KM : false;
+  const color = CATEGORY_CONFIG[category]?.color || '#ef4444';
 
-  // Stable callback per render of THIS component. React.memo below skips
-  // re-renders when props don't change shallowly.
-  const onClick = useCallback(() => onSelect(poi), [onSelect, poi]);
+  const onClick = useCallback(() => onSelect(poi, category), [onSelect, poi, category]);
 
   const icon = useMemo(
-    () =>
-      isSelected
-        ? {
-            path: 'M 0,0 m -14,0 a 14,14 0 1,0 28,0 a 14,14 0 1,0 -28,0',
-            fillColor: '#ef4444',
-            fillOpacity: 1,
-            strokeColor: '#ffffff',
-            strokeWeight: 2,
-            scale: 1
-          }
-        : undefined,
-    [isSelected]
+    () => ({
+      path: isSelected
+        ? 'M 0,0 m -14,0 a 14,14 0 1,0 28,0 a 14,14 0 1,0 -28,0'
+        : 'M 0,0 m -12,0 a 12,12 0 1,0 24,0 a 12,12 0 1,0 -24,0',
+      fillColor: color,
+      fillOpacity: 1,
+      strokeColor: isSelected ? '#ffffff' : '#ffffff',
+      strokeWeight: isSelected ? 3 : 2,
+      scale: 1
+    }),
+    [isSelected, color]
   );
 
   return (
@@ -150,19 +251,19 @@ function POIMarker({ poi, index, anchor, isSelected, onSelect }) {
         text: String(index + 1),
         color: 'white',
         fontWeight: '700',
-        fontSize: '13px'
+        fontSize: '12px'
       }}
       icon={icon}
+      zIndex={isSelected ? 200 : 10}
     />
   );
 }
 
-// Custom equality: only re-render the marker if its content changed.
-// Without this, every map state change re-renders all 10+ markers.
 const MemoPOIMarker = memo(POIMarker, (prev, next) => {
   return (
     prev.poi.placeId === next.poi.placeId &&
     prev.index === next.index &&
+    prev.category === next.category &&
     prev.anchor?.placeId === next.anchor?.placeId &&
     prev.isSelected === next.isSelected &&
     prev.onSelect === next.onSelect
@@ -216,11 +317,6 @@ function MapTypeSync({ mapType }) {
   return null;
 }
 
-/**
- * Pans the map to lat/lng when those change.
- * `skip` prevents this from fighting with nearby-mode (where the user just
- * clicked a hotel and we don't want to jerk the map back to city center).
- */
 function CenterSync({ lat, lng, skip }) {
   const map = useMap();
   useEffect(() => {
@@ -282,14 +378,6 @@ function ProximityRing({ center, radiusKm }) {
   return null;
 }
 
-/**
- * Watches map idle events and triggers refreshViewport when the user has
- * actually moved meaningfully (debounced + min-move threshold).
- *
- * `idle` fires when pan/zoom settles — that's the right hook for "stopped
- * interacting." Listening to drag/zoom events directly would fire dozens
- * of times per gesture.
- */
 function ViewportWatcher({ centerLat, centerLng }) {
   const map = useMap();
   const { refreshViewport, nearbyAnchor } = useTrip();
@@ -297,10 +385,6 @@ function ViewportWatcher({ centerLat, centerLng }) {
   const debounceRef = useRef(null);
   const initialFireSkippedRef = useRef(false);
 
-  // Mirror nearbyAnchor in a ref so the debounced timeout always reads the
-  // CURRENT value, not the value captured when the timer was scheduled.
-  // Without this, a pan-then-click-hotel sequence fires a stale viewport
-  // refresh after entering nearby-mode.
   const nearbyAnchorRef = useRef(nearbyAnchor);
   useEffect(() => {
     nearbyAnchorRef.current = nearbyAnchor;
@@ -310,20 +394,16 @@ function ViewportWatcher({ centerLat, centerLng }) {
     if (!map) return undefined;
 
     const handleIdle = () => {
-      // Skip the very first idle (initial map render, not user interaction)
       if (!initialFireSkippedRef.current) {
         initialFireSkippedRef.current = true;
         return;
       }
-      // Don't fight nearby-mode
       if (nearbyAnchorRef.current) return;
 
       const c = map.getCenter();
       if (!c) return;
       const next = { lat: c.lat(), lng: c.lng() };
 
-      // Compute viewport radius from current bounds so the cache key
-      // accounts for zoom level too.
       const bounds = map.getBounds();
       let radiusMeters = 5000;
       if (bounds) {
@@ -336,18 +416,14 @@ function ViewportWatcher({ centerLat, centerLng }) {
         radiusMeters = Math.max(1500, Math.round((diagKm / 2) * 1000));
       }
 
-      // Skip if user hasn't actually moved meaningfully
       const last = lastTriggeredRef.current;
       if (last) {
         const moved = haversineKm(last, next);
         if (moved < VIEWPORT_MIN_MOVE_KM) return;
       }
 
-      // Debounce
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
-        // Re-check nearby-mode at fire time — user may have clicked a hotel
-        // during the debounce window.
         if (nearbyAnchorRef.current) return;
         lastTriggeredRef.current = next;
         refreshViewport({ lat: next.lat, lng: next.lng, radiusMeters });
@@ -364,8 +440,6 @@ function ViewportWatcher({ centerLat, centerLng }) {
     };
   }, [map, refreshViewport]);
 
-  // Reset position memory when the search destination changes — a new city
-  // shouldn't inherit the old city's "we already triggered here" state.
   useEffect(() => {
     lastTriggeredRef.current = null;
     initialFireSkippedRef.current = false;

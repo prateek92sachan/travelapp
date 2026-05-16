@@ -34,6 +34,15 @@ export default function PlacesDrawer() {
 
   useEscapeKey(mobileExpanded, () => setMobileExpanded(false));
 
+  // Open the mobile overlay when a map marker is clicked
+  useEffect(() => {
+    function onOpenPlaces() {
+      if (!isDesktop) setMobileExpanded(true);
+    }
+    window.addEventListener('travelapp:openPlaces', onOpenPlaces);
+    return () => window.removeEventListener('travelapp:openPlaces', onOpenPlaces);
+  }, [isDesktop]);
+
   // Push a history entry when overlay opens so swipe-back closes it
   // instead of navigating away from the site.
   useEffect(() => {

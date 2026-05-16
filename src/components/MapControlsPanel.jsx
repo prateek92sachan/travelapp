@@ -1,12 +1,7 @@
 import { useState } from 'react';
 import { useTrip } from '../hooks/useTrip';
 
-/**
- * Floating panel inside the map that holds layer toggles.
- * Collapsible — collapsed state shows just an icon button so it doesn't
- * obscure the map; expanded shows the full set of controls.
- */
-export default function MapControlsPanel() {
+export default function MapControlsPanel({ open: openProp, onToggle: onToggleProp }) {
   const {
     mapType,
     setMapType,
@@ -17,20 +12,25 @@ export default function MapControlsPanel() {
     hotelsLoading
   } = useTrip();
 
-  const [open, setOpen] = useState(false);
+  const [localOpen, setLocalOpen] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : localOpen;
+  const handleToggle = controlled ? onToggleProp : () => setLocalOpen((o) => !o);
 
   return (
     <div className={`map-controls ${open ? 'open' : 'closed'}`}>
-      <button
-        type="button"
-        className="map-controls-toggle"
-        onClick={() => setOpen((o) => !o)}
-        title={open ? 'Hide map controls' : 'Show map controls'}
-        aria-label={open ? 'Hide map controls' : 'Show map controls'}
-        aria-expanded={open}
-      >
-        {open ? '✕' : '⚙'}
-      </button>
+      {!controlled && (
+        <button
+          type="button"
+          className="map-controls-toggle"
+          onClick={handleToggle}
+          title={open ? 'Hide map controls' : 'Show map controls'}
+          aria-label={open ? 'Hide map controls' : 'Show map controls'}
+          aria-expanded={open}
+        >
+          {open ? '✕' : '⚙'}
+        </button>
+      )}
 
       {open && (
         <div className="map-controls-body">

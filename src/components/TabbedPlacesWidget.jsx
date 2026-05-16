@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Compass, Utensils, Leaf, Gem, Heart } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Compass, Utensils, Leaf, Gem, Heart, Navigation } from 'lucide-react';
 import Card from './Card';
 import { useTrip } from '../hooks/useTrip';
 import { directionsUrl } from '../services/googleMaps';
@@ -23,6 +23,7 @@ export default function TabbedPlacesWidget({ expandable = true }) {
     activeTabItems,
     activeTabLoading,
     selectedPlaceId,
+    selectedPlace,
     selectPlace,
     wishlistLists,
     activeWishlist,
@@ -35,9 +36,20 @@ export default function TabbedPlacesWidget({ expandable = true }) {
     isWishlisted
   } = useTrip();
 
-  const selected = activeTabItems.find((a) => a.placeId === selectedPlaceId);
+  // Use selectedPlace directly — avoids the card vanishing when tab switches
+  // before activeTabItems updates, or when data hasn't loaded yet.
+  const selected = selectedPlace;
   const isWishlistTab = activeTab === 'wishlist';
   const savedCount = activeWishlist?.items?.length || 0;
+
+  useEffect(() => {
+    if (!selectedPlaceId) return;
+    const raf = requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-place-id="${selectedPlaceId}"]`);
+      if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [selectedPlaceId]);
 
   return (
     <>
@@ -140,6 +152,15 @@ export default function TabbedPlacesWidget({ expandable = true }) {
   );
 }
 
+const CATEGORY_OPTIONS = [
+  { value: 'activities', label: 'Activity' },
+  { value: 'restaurants', label: 'Restaurant' },
+  { value: 'nature', label: 'Nature' },
+  { value: 'gems', label: 'Hidden gem' },
+];
+
+const EMPTY_ADD_FORM = { name: '', location: '', category: 'activities', duration: '', cost: '' };
+
 function WishlistTab({
   lists,
   activeList,
@@ -149,11 +170,56 @@ function WishlistTab({
   onDelete,
   onRemove
 }) {
+  const { addPlaceToWishlist, activeWishlistId } = useTrip();
   const [renameValue, setRenameValue] = useState(activeList?.name || '');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addForm, setAddForm] = useState(EMPTY_ADD_FORM);
+
+  const longPressTimer = useRef(null);
+  const didLongPress = useRef(false);
+  const addFormRef = useRef(null);
+
+  useEffect(() => {
+    if (showAddForm && addFormRef.current) {
+      addFormRef.current.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
+  }, [showAddForm]);
 
   useEffect(() => {
     setRenameValue(activeList?.name || '');
   }, [activeList?.id, activeList?.name]);
+
+  function handleChipPointerDown() {
+    didLongPress.current = false;
+    longPressTimer.current = setTimeout(() => {
+      didLongPress.current = true;
+      setPickerOpen(true);
+    }, 500);
+  }
+
+  function handleChipPointerUp() {
+    clearTimeout(longPressTimer.current);
+  }
+
+  function handleChipClick(listId) {
+    if (!didLongPress.current) onSelect(listId);
+  }
+
+  function handleAddSubmit(e) {
+    e.preventDefault();
+    if (!addForm.name.trim() || !activeWishlistId) return;
+    const place = {
+      placeId: 'manual-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+      name: addForm.name.trim(),
+      address: addForm.location.trim() || undefined,
+      estDuration: addForm.duration.trim() || undefined,
+      estCost: addForm.cost.trim() || undefined,
+    };
+    addPlaceToWishlist(place, addForm.category);
+    setAddForm(EMPTY_ADD_FORM);
+    setShowAddForm(false);
+  }
 
   return (
     <div className="wishlist-workspace">
@@ -161,7 +227,7 @@ function WishlistTab({
         <div>
           <div className="wishlist-workspace-title">Wishlist workspace</div>
           <div className="wishlist-workspace-copy">
-            The current search owns the active wishlist. Rename it here, then save cards from Activities, Restaurants, Nature, or Hidden gems.
+            Tap a list to switch. Hold to see all. Save cards from Activities, Restaurants, Nature, or Hidden gems — or add places manually.
           </div>
         </div>
       </div>
@@ -173,12 +239,36 @@ function WishlistTab({
               key={list.id}
               type="button"
               className={`wishlist-list-chip ${activeListId === list.id ? 'active' : ''}`}
-              onClick={() => onSelect(list.id)}
+              onPointerDown={handleChipPointerDown}
+              onPointerUp={handleChipPointerUp}
+              onPointerLeave={handleChipPointerUp}
+              onContextMenu={(e) => e.preventDefault()}
+              onClick={() => handleChipClick(list.id)}
             >
               <span>{shortListName(list.name)}</span>
               <span>{list.items.length}</span>
             </button>
           ))}
+        </div>
+      )}
+
+      {pickerOpen && (
+        <div className="wishlist-picker-overlay">
+          <div className="wishlist-picker-backdrop" onClick={() => setPickerOpen(false)} />
+          <div className="wishlist-picker-panel">
+            <div className="wishlist-picker-title">Your wishlists</div>
+            {lists.map((list) => (
+              <button
+                key={list.id}
+                type="button"
+                className={`wishlist-picker-item ${activeListId === list.id ? 'active' : ''}`}
+                onClick={() => { onSelect(list.id); setPickerOpen(false); }}
+              >
+                <span className="wishlist-picker-item-name">{list.name}</span>
+                <span className="wishlist-picker-item-count">{list.items.length} saved</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -234,6 +324,56 @@ function WishlistTab({
               ))}
             </div>
           )}
+
+          <button
+            type="button"
+            className={`wishlist-add-trigger ${showAddForm ? 'open' : ''}`}
+            onClick={() => setShowAddForm((v) => !v)}
+          >
+            {showAddForm ? '✕' : '+ Add'}
+          </button>
+
+          {showAddForm && (
+            <form ref={addFormRef} className="wishlist-add-form" onSubmit={handleAddSubmit}>
+              <input
+                className="input"
+                placeholder="Place name *"
+                required
+                value={addForm.name}
+                onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))}
+              />
+              <input
+                className="input"
+                placeholder="Location / city"
+                value={addForm.location}
+                onChange={(e) => setAddForm((f) => ({ ...f, location: e.target.value }))}
+              />
+              <select
+                className="input"
+                value={addForm.category}
+                onChange={(e) => setAddForm((f) => ({ ...f, category: e.target.value }))}
+              >
+                {CATEGORY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <div className="wishlist-add-form-row">
+                <input
+                  className="input"
+                  placeholder="Duration (e.g. 2 hrs)"
+                  value={addForm.duration}
+                  onChange={(e) => setAddForm((f) => ({ ...f, duration: e.target.value }))}
+                />
+                <input
+                  className="input"
+                  placeholder="Cost (e.g. $$)"
+                  value={addForm.cost}
+                  onChange={(e) => setAddForm((f) => ({ ...f, cost: e.target.value }))}
+                />
+              </div>
+              <button type="submit" className="btn" style={{ width: '100%' }}>Add to list</button>
+            </form>
+          )}
         </div>
       )}
     </div>
@@ -273,6 +413,7 @@ function PlaceRow({
       role="button"
       tabIndex={0}
       className={`activity-item ${selected ? 'selected' : ''}`}
+      data-place-id={a.placeId}
       onClick={onSelect}
       onKeyDown={onKeyDown}
       aria-pressed={selected}
@@ -415,23 +556,23 @@ function PlaceDetail({
       <div className="detail-actions">
         <button
           type="button"
-          className={`btn ${saved ? 'btn-ghost' : ''}`}
+          className={`btn detail-save-btn ${saved ? 'btn-ghost' : ''}`}
           onClick={toggleWishlist}
         >
-          {saved
-            ? 'Remove from wishlist'
-            : `Save to ${activeListName || 'wishlist'}`}
+          <Heart size={14} strokeWidth={2} fill={saved ? 'currentColor' : 'none'} aria-hidden />
+          {saved ? 'Saved' : 'Save'}
         </button>
         <a
-          className="btn"
+          className="btn btn-outline detail-dir-btn"
           href={directionsUrl(place)}
           target="_blank"
           rel="noopener noreferrer"
-          style={{ textDecoration: 'none', display: 'inline-block' }}
+          style={{ textDecoration: 'none' }}
         >
-          Get directions
+          <Navigation size={14} strokeWidth={2} aria-hidden />
+          Directions
         </a>
-        <button type="button" className="btn btn-ghost" onClick={onClose}>
+        <button type="button" className="btn btn-ghost detail-close-btn" onClick={onClose}>
           Close
         </button>
       </div>

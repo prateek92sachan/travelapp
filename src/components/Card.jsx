@@ -13,6 +13,7 @@ export default function Card({
   title,
   children,
   extraHeader,
+  middleHeader,
   stickyNav,
   expandable = true,
   className = '',
@@ -34,26 +35,31 @@ export default function Card({
         <div className="expand-overlay" onClick={() => setExpanded(false)} />
       )}
       <div className={`card ${expanded ? 'expanded' : ''} ${className}`}>
-        <div className="card-header">
-          <h3 className="card-title">
-            {icon && <span aria-hidden>{icon}</span>}
-            <span>{title}</span>
-          </h3>
-          <div className="row">
-            {extraHeader}
-            {expandable && (
-              <button
-                type="button"
-                className="btn-close"
-                onClick={() => setExpanded((e) => !e)}
-                title={expanded ? 'Collapse' : 'Expand'}
-                aria-label={expanded ? 'Collapse' : 'Expand'}
-              >
-                {expanded ? '✕' : '⤢'}
-              </button>
+        {(icon || title || extraHeader || middleHeader || expandable) && (
+          <div className="card-header">
+            <h3 className="card-title">
+              {icon && <span aria-hidden>{icon}</span>}
+              <span>{title}</span>
+            </h3>
+            {middleHeader && (
+              <div className="card-header-middle">{middleHeader}</div>
             )}
+            <div className="row">
+              {extraHeader}
+              {expandable && (
+                <button
+                  type="button"
+                  className="btn-close"
+                  onClick={() => setExpanded((e) => !e)}
+                  title={expanded ? 'Collapse' : 'Expand'}
+                  aria-label={expanded ? 'Collapse' : 'Expand'}
+                >
+                  {expanded ? '✕' : '⤢'}
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        )}
         {stickyNav && <div className="card-sticky-nav">{stickyNav}</div>}
         <div className={`card-body ${bodyClassName}`}>{children}</div>
       </div>

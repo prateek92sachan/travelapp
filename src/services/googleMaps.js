@@ -30,6 +30,7 @@ export async function geocodeDestination(destination) {
 
   const r = data.results[0];
   const types = r.types || [];
+  const vp = r.geometry.viewport;
   return {
     lat: r.geometry.location.lat,
     lng: r.geometry.location.lng,
@@ -40,7 +41,11 @@ export async function geocodeDestination(destination) {
     isCountry: types.includes('country'),
     isAdminRegion:
       types.includes('administrative_area_level_1') &&
-      !types.includes('locality')
+      !types.includes('locality'),
+    // Bounding box of the geocoded area — used to scale the places search
+    // radius to match the actual size of the searched region.
+    viewportNE: vp ? { lat: vp.northeast.lat, lng: vp.northeast.lng } : null,
+    viewportSW: vp ? { lat: vp.southwest.lat, lng: vp.southwest.lng } : null
   };
 }
 
@@ -188,6 +193,7 @@ async function fetchAndRank({
   textQuery,
   lat,
   lng,
+  radiusMeters = 20000,
   limit = 10,
   fetchCount = 20,
   filterOpts,
@@ -197,7 +203,7 @@ async function fetchAndRank({
     textQuery,
     lat,
     lng,
-    radiusMeters: 20000,
+    radiusMeters,
     fetchCount
   });
 
@@ -223,11 +229,12 @@ async function fetchAndRank({
 
 // ---- Public: fetch top POIs (used by Map widget for markers) --------------
 
-export async function fetchTopPOIs({ destination, lat, lng, limit = 10 }) {
+export async function fetchTopPOIs({ destination, lat, lng, radiusMeters = 20000, limit = 10 }) {
   return fetchAndRank({
     textQuery: `top tourist attractions in ${destination}`,
     lat,
     lng,
+    radiusMeters,
     limit,
     filterOpts: { minRating: 4.0, minReviews: 50 }
   });
@@ -235,31 +242,34 @@ export async function fetchTopPOIs({ destination, lat, lng, limit = 10 }) {
 
 // ---- Public: tab-specific fetchers ----------------------------------------
 
-export async function fetchTopActivities({ destination, lat, lng, limit = 10 }) {
+export async function fetchTopActivities({ destination, lat, lng, radiusMeters = 20000, limit = 10 }) {
   return fetchAndRank({
     textQuery: `things to do and activities in ${destination}`,
     lat,
     lng,
+    radiusMeters,
     limit,
     filterOpts: { minRating: 4.0, minReviews: 30 }
   });
 }
 
-export async function fetchTopRestaurants({ destination, lat, lng, limit = 10 }) {
+export async function fetchTopRestaurants({ destination, lat, lng, radiusMeters = 20000, limit = 10 }) {
   return fetchAndRank({
     textQuery: `best restaurants in ${destination}`,
     lat,
     lng,
+    radiusMeters,
     limit,
     filterOpts: { minRating: 4.2, minReviews: 100 }
   });
 }
 
-export async function fetchTopNatureUnique({ destination, lat, lng, limit = 10 }) {
+export async function fetchTopNatureUnique({ destination, lat, lng, radiusMeters = 20000, limit = 10 }) {
   return fetchAndRank({
     textQuery: `natural attractions parks scenic spots and unique places in ${destination}`,
     lat,
     lng,
+    radiusMeters,
     limit,
     filterOpts: { minRating: 4.0, minReviews: 50 }
   });
@@ -273,11 +283,12 @@ export async function fetchTopNatureUnique({ destination, lat, lng, limit = 10 }
  * Higher fetch limit (15) than other categories — map can comfortably
  * display more lodging markers without losing density.
  */
-export async function fetchTopHotels({ destination, lat, lng, limit = 15 }) {
+export async function fetchTopHotels({ destination, lat, lng, radiusMeters = 20000, limit = 15 }) {
   return fetchAndRank({
     textQuery: `top hotels in ${destination}`,
     lat,
     lng,
+    radiusMeters,
     limit,
     fetchCount: 20,
     customFilter: (p) => {
@@ -301,11 +312,12 @@ export async function fetchTopHotels({ destination, lat, lng, limit = 15 }) {
  * bound filters out the obvious top-of-mind spots that would already be in
  * the Activities tab.
  */
-export async function fetchHiddenGems({ destination, lat, lng, limit = 10 }) {
+export async function fetchHiddenGems({ destination, lat, lng, radiusMeters = 20000, limit = 10 }) {
   return fetchAndRank({
     textQuery: `hidden gems and lesser-known places in ${destination}`,
     lat,
     lng,
+    radiusMeters,
     limit,
     fetchCount: 20,
     customFilter: (p) => {
