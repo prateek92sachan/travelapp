@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Compass, Utensils, Leaf, Gem, Settings } from 'lucide-react';
-import { Map, Marker, useMap } from '@vis.gl/react-google-maps';
+import { Map, AdvancedMarker, useMap } from '@vis.gl/react-google-maps';
+import { GOOGLE_MAPS_MAP_ID } from '../services/config';
 import Card from './Card';
 import { useTrip } from '../hooks/useTrip';
 import { useTheme } from '../hooks/useTheme';
@@ -104,6 +105,7 @@ function MapInner({ center, hotels, mapType, visibleCategories, toggleCategory, 
         defaultCenter={{ lat: center.lat, lng: center.lng }}
         defaultZoom={12}
         mapTypeId={mapType}
+        mapId={GOOGLE_MAPS_MAP_ID || null}
         gestureHandling="greedy"
         disableDefaultUI={false}
         mapTypeControl={false}
@@ -112,12 +114,13 @@ function MapInner({ center, hotels, mapType, visibleCategories, toggleCategory, 
         colorScheme={theme === 'dark' ? 'DARK' : 'LIGHT'}
         style={{ width: '100%', height: '100%' }}
       >
-        <Marker
+        <AdvancedMarker
           position={{ lat: center.lat, lng: center.lng }}
           title={center.formattedAddress}
-          label={{ text: '★', color: 'white', fontWeight: '700' }}
           zIndex={500}
-        />
+        >
+          <div className="map-marker-center">★</div>
+        </AdvancedMarker>
 
         {CATEGORY_KEYS.map((cat) =>
           visibleCategories[cat]
@@ -223,39 +226,28 @@ function CategoryTogglePanel({ visible, onToggle }) {
 function POIMarker({ poi, index, anchor, isSelected, onSelect, category }) {
   const isOutsideRing = anchor ? haversineKm(anchor, poi) > PROXIMITY_KM : false;
   const color = CATEGORY_CONFIG[category]?.color || '#ef4444';
-
   const onClick = useCallback(() => onSelect(poi, category), [onSelect, poi, category]);
 
-  const icon = useMemo(
-    () => ({
-      path: isSelected
-        ? 'M 0,0 m -14,0 a 14,14 0 1,0 28,0 a 14,14 0 1,0 -28,0'
-        : 'M 0,0 m -12,0 a 12,12 0 1,0 24,0 a 12,12 0 1,0 -24,0',
-      fillColor: color,
-      fillOpacity: 1,
-      strokeColor: isSelected ? '#ffffff' : '#ffffff',
-      strokeWeight: isSelected ? 3 : 2,
-      scale: 1
-    }),
-    [isSelected, color]
-  );
-
   return (
-    <Marker
+    <AdvancedMarker
       position={{ lat: poi.lat, lng: poi.lng }}
       title={`${index + 1}. ${poi.name}`}
-      clickable
       onClick={onClick}
-      opacity={isOutsideRing ? 0.35 : 1}
-      label={{
-        text: String(index + 1),
-        color: 'white',
-        fontWeight: '700',
-        fontSize: '12px'
-      }}
-      icon={icon}
       zIndex={isSelected ? 200 : 10}
-    />
+    >
+      <div
+        className={`map-marker-poi${isSelected ? ' selected' : ''}`}
+        style={{
+          background: color,
+          opacity: isOutsideRing ? 0.35 : 1,
+          boxShadow: isSelected
+            ? `0 0 0 3px white, 0 0 0 5px ${color}`
+            : '0 1px 4px rgba(0,0,0,0.4)'
+        }}
+      >
+        {index + 1}
+      </div>
+    </AdvancedMarker>
   );
 }
 
@@ -273,28 +265,15 @@ const MemoPOIMarker = memo(POIMarker, (prev, next) => {
 function HotelMarker({ hotel, isSelected, onSelect }) {
   const onClick = useCallback(() => onSelect(hotel), [onSelect, hotel]);
 
-  const icon = useMemo(
-    () => ({
-      path: 'M 0,0 m -11,0 a 11,11 0 1,0 22,0 a 11,11 0 1,0 -22,0',
-      fillColor: isSelected ? '#0d9488' : '#14b8a6',
-      fillOpacity: 1,
-      strokeColor: '#ffffff',
-      strokeWeight: 2,
-      scale: 1
-    }),
-    [isSelected]
-  );
-
   return (
-    <Marker
+    <AdvancedMarker
       position={{ lat: hotel.lat, lng: hotel.lng }}
       title={hotel.name}
-      clickable
       onClick={onClick}
-      icon={icon}
-      label={{ text: '🛏', fontSize: '11px' }}
       zIndex={isSelected ? 1000 : 100}
-    />
+    >
+      <div className={`map-marker-hotel${isSelected ? ' selected' : ''}`}>🛏</div>
+    </AdvancedMarker>
   );
 }
 
