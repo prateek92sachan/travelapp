@@ -74,6 +74,7 @@ export function AuthProvider({ children }) {
     try {
       return await loadUserData(user.uid);
     } catch (err) {
+      if (err.name === 'AbortError') return null;
       console.warn('Cloud load failed:', err);
       return null;
     }

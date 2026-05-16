@@ -195,7 +195,7 @@ export function TripProvider({ children }) {
         setWishlist(replaceWishlist(cloudData.wishlist));
         if (cloudData.recentTrips) replaceRecentTrips(cloudData.recentTrips);
       })
-      .catch((err) => console.warn('Cloud load on sign-in failed:', err));
+      .catch((err) => { if (err.name !== 'AbortError') console.warn('Cloud load on sign-in failed:', err); });
   }, [user, loadFromCloud, saveToCloud]);
 
   // Debounced cloud save whenever wishlist changes (also ships latest recentTrips)
