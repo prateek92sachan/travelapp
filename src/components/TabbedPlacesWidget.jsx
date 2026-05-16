@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Compass, Utensils, Leaf, Gem, Heart, Navigation } from 'lucide-react';
+import { Compass, Utensils, Leaf, Gem, Heart, Navigation, Phone, Globe } from 'lucide-react';
 import Card from './Card';
 import { useTrip } from '../hooks/useTrip';
-import { directionsUrl } from '../services/googleMaps';
+import { directionsUrl, fetchPlaceDetails } from '../services/googleMaps';
+import { fetchWikiSummary } from '../services/wikipedia';
+import { fetchPlaceDescription } from '../services/gemini';
 import { SavedPlaceCard } from './WishlistPanel';
 import { formatCount } from '../utils/format';
 import { shortenAddress } from '../utils/shortenAddress';
@@ -50,6 +52,19 @@ export default function TabbedPlacesWidget({ expandable = true }) {
     });
     return () => cancelAnimationFrame(raf);
   }, [selectedPlaceId]);
+
+  // Close detail panel on click-outside, but let place-row clicks go through
+  // so selecting a new place while another is open works in one tap.
+  useEffect(() => {
+    if (!selected) return;
+    function handlePointerDown(e) {
+      if (e.target.closest('.detail-panel')) return;
+      if (e.target.closest('.activity-item')) return;
+      selectPlace(null);
+    }
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [selected, selectPlace]);
 
   return (
     <>
@@ -465,6 +480,17 @@ function PlaceRow({
   );
 }
 
+function truncateExtract(text, maxLen = 280) {
+  if (!text || text.length <= maxLen) return text;
+  const cut = text.slice(0, maxLen);
+  const dot = cut.lastIndexOf('. ');
+  return dot > 60 ? cut.slice(0, dot + 1) : cut.trim() + '…';
+}
+
+function hostnameOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
+}
+
 function PlaceDetail({
   place,
   onClose,
@@ -474,11 +500,51 @@ function PlaceDetail({
   onSave,
   onRemove
 }) {
-  const description = place.wiki?.extract || place.summary;
-  const toggleWishlist = () => {
-    if (saved) onRemove();
-    else onSave();
-  };
+  const { destination } = useTrip();
+  const isManual = place.placeId?.startsWith('manual-');
+
+  const [details, setDetails] = useState(null);
+  const [wikiData, setWikiData] = useState(place.wiki ?? undefined);
+  const [geminiDesc, setGeminiDesc] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(!isManual);
+  const [hoursOpen, setHoursOpen] = useState(false);
+  const [descExpanded, setDescExpanded] = useState(false);
+
+  useEffect(() => {
+    if (isManual) return;
+    let cancelled = false;
+    setDetails(null);
+    setGeminiDesc(null);
+    setDescExpanded(false);
+    setDetailsLoading(true);
+    if (!place.wiki) setWikiData(undefined);
+
+    const p1 = fetchPlaceDetails(place.placeId)
+      .then((d) => { if (!cancelled) setDetails(d); })
+      .catch(() => { if (!cancelled) setDetails(null); });
+
+    const p2 = place.wiki
+      ? Promise.resolve()
+      : fetchWikiSummary(place.name, destination)
+          .then((w) => { if (!cancelled) setWikiData(w); })
+          .catch(() => { if (!cancelled) setWikiData(null); });
+
+    const p3 = fetchPlaceDescription(place)
+      .then((d) => { if (!cancelled) setGeminiDesc(d); })
+      .catch(() => { if (!cancelled) setGeminiDesc(null); });
+
+    Promise.all([p1, p2, p3]).then(() => { if (!cancelled) setDetailsLoading(false); });
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [place.placeId]);
+
+  const wikiExtract = wikiData?.extract ?? place.wiki?.extract ?? null;
+  const wikiUrl = wikiData?.url ?? place.wiki?.url ?? null;
+  // Gemini primary → wiki full extract fallback → editorial summary last resort
+  const richDescription = geminiDesc || wikiExtract || details?.editorialSummary || null;
+
+  const toggleWishlist = () => { if (saved) onRemove(); else onSave(); };
 
   return (
     <div className="detail-panel" role="dialog" aria-label="Place details">
@@ -487,48 +553,51 @@ function PlaceDetail({
           <h4 className="detail-title">{place.name}</h4>
           <p className="detail-address">{place.address}</p>
         </div>
-        <button
-          type="button"
-          className="icon-btn"
-          onClick={onClose}
-          aria-label="Close details"
-          style={{ width: 32, height: 32 }}
-        >
+        <button type="button" className="icon-btn" onClick={onClose} aria-label="Close details" style={{ width: 32, height: 32 }}>
           ✕
         </button>
       </div>
 
       {place.photoUrl && (
         <div className="detail-photo">
-          <img
-            src={place.photoUrl}
-            alt={place.name}
-            onError={(e) => (e.currentTarget.style.display = 'none')}
-          />
+          <img src={place.photoUrl} alt={place.name} onError={(e) => (e.currentTarget.style.display = 'none')} />
         </div>
       )}
 
-      <p style={{ fontSize: 14, color: 'var(--text-muted)', margin: '8px 0 0', lineHeight: 1.5 }}>
-        {description}
-      </p>
-
-      {place.wiki?.url && (
-        <a
-          href={place.wiki.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            fontSize: 12,
-            color: 'var(--accent)',
-            textDecoration: 'none',
-            marginTop: 4,
-            display: 'inline-block'
-          }}
-        >
-          Read more on Wikipedia
-        </a>
+      {/* Open now badge + hours */}
+      {detailsLoading ? (
+        <div className="skeleton" style={{ height: 22, width: 72, margin: '10px 0 0', borderRadius: 999 }} />
+      ) : details?.openNow != null && (
+        <div className="detail-open-row">
+          <span className={`detail-open-badge ${details.openNow ? 'open' : 'closed'}`}>
+            {details.openNow ? 'Open now' : 'Closed'}
+          </span>
+          {details.weekdayHours.length > 0 && (
+            <button type="button" className="detail-hours-toggle" onClick={() => setHoursOpen((v) => !v)}>
+              {hoursOpen ? 'Hide hours' : 'See hours'}
+            </button>
+          )}
+        </div>
+      )}
+      {hoursOpen && details?.weekdayHours.length > 0 && (
+        <div className="detail-hours">
+          {details.weekdayHours.map((h, i) => (
+            <div key={i} className="detail-hour-row">{h}</div>
+          ))}
+        </div>
       )}
 
+      {/* Description */}
+      {richDescription && (
+        <ExpandableDescription
+          text={richDescription}
+          expanded={descExpanded}
+          onToggle={() => setDescExpanded((v) => !v)}
+          wikiUrl={!geminiDesc ? wikiUrl : null}
+        />
+      )}
+
+      {/* Stats */}
       <div className="detail-stats">
         <div className="detail-stat">
           <div className="k">Duration</div>
@@ -536,7 +605,7 @@ function PlaceDetail({
         </div>
         <div className="detail-stat">
           <div className="k">Cost</div>
-          <div className="v">{place.estCost}</div>
+          <div className="v">{details?.priceLevel || place.estCost}</div>
         </div>
         {place.rating != null && (
           <div className="detail-stat">
@@ -545,7 +614,7 @@ function PlaceDetail({
               {place.rating}
               {place.reviewCount > 0 && (
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 4 }}>
-                  ({formatCount(place.reviewCount)} reviews)
+                  ({formatCount(place.reviewCount)})
                 </span>
               )}
             </div>
@@ -553,22 +622,52 @@ function PlaceDetail({
         )}
       </div>
 
+      {/* Contact: phone + website */}
+      {!detailsLoading && (details?.phone || details?.website) && (
+        <div className="detail-contact">
+          {details.phone && (
+            <a href={`tel:${details.phone}`} className="detail-contact-item">
+              <Phone size={12} strokeWidth={2} aria-hidden />
+              {details.phone}
+            </a>
+          )}
+          {details.website && (
+            <a href={details.website} target="_blank" rel="noopener noreferrer" className="detail-contact-item">
+              <Globe size={12} strokeWidth={2} aria-hidden />
+              {hostnameOf(details.website)}
+            </a>
+          )}
+        </div>
+      )}
+
+      {/* Reviews */}
+      {details?.reviews?.length > 0 && (
+        <div className="detail-reviews">
+          <div className="detail-section-label">Reviews</div>
+          {details.reviews.map((r, i) => (
+            <div key={i} className="detail-review">
+              <div className="detail-review-header">
+                <span className="detail-review-author">{r.author}</span>
+                <span className="detail-review-meta">
+                  {'★'.repeat(r.rating ?? 0)}{r.time ? ` · ${r.time}` : ''}
+                </span>
+              </div>
+              {r.text && (
+                <p className="detail-review-text">
+                  {r.text.length > 200 ? r.text.slice(0, 200) + '…' : r.text}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="detail-actions">
-        <button
-          type="button"
-          className={`btn detail-save-btn ${saved ? 'btn-ghost' : ''}`}
-          onClick={toggleWishlist}
-        >
+        <button type="button" className={`btn detail-save-btn ${saved ? 'btn-ghost' : ''}`} onClick={toggleWishlist}>
           <Heart size={14} strokeWidth={2} fill={saved ? 'currentColor' : 'none'} aria-hidden />
           {saved ? 'Saved' : 'Save'}
         </button>
-        <a
-          className="btn btn-outline detail-dir-btn"
-          href={directionsUrl(place)}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ textDecoration: 'none' }}
-        >
+        <a className="btn btn-outline detail-dir-btn" href={directionsUrl(place)} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
           <Navigation size={14} strokeWidth={2} aria-hidden />
           Directions
         </a>
@@ -576,6 +675,33 @@ function PlaceDetail({
           Close
         </button>
       </div>
+    </div>
+  );
+}
+
+function first30Words(text) {
+  const words = text.trim().split(/\s+/);
+  if (words.length <= 30) return { preview: text, hasMore: false };
+  return { preview: words.slice(0, 30).join(' ') + '…', hasMore: true };
+}
+
+function ExpandableDescription({ text, expanded, onToggle, wikiUrl }) {
+  const { preview, hasMore } = first30Words(text);
+  return (
+    <div className="detail-description-block">
+      <p className="detail-description">
+        {expanded ? text : preview}
+      </p>
+      {hasMore && (
+        <button type="button" className="detail-see-more" onClick={onToggle}>
+          {expanded ? 'See less' : 'See more'}
+        </button>
+      )}
+      {wikiUrl && expanded && (
+        <a href={wikiUrl} target="_blank" rel="noopener noreferrer" className="detail-wiki-link">
+          Read more on Wikipedia
+        </a>
+      )}
     </div>
   );
 }
