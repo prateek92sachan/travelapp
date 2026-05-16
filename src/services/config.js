@@ -8,6 +8,7 @@ export function assertKeys() {
   const missing = [];
   if (!GOOGLE_MAPS_KEY) missing.push('VITE_GOOGLE_MAPS_KEY');
   if (!OPENWEATHER_KEY) missing.push('VITE_OPENWEATHER_KEY');
+  if (!GEMINI_KEY) missing.push('VITE_GEMINI_KEY');
   if (missing.length) {
     console.warn(
       `Missing env vars: ${missing.join(', ')}. ` +

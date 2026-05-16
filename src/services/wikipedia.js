@@ -12,6 +12,8 @@ const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
 const WIKI_SEARCH =
   'https://en.wikipedia.org/w/api.php?action=opensearch&format=json&origin=*&limit=1&search=';
 
+const WIKI_CACHE = new Map();
+
 /**
  * Look up a place on Wikipedia, return { extract, url } or null.
  * Always resolves — never throws — so a single missing article doesn't
@@ -24,6 +26,8 @@ const WIKI_SEARCH =
 export async function fetchWikiSummary(placeName, context = '') {
   if (!placeName) return null;
   const query = context ? `${placeName} ${context}` : placeName;
+
+  if (WIKI_CACHE.has(query)) return WIKI_CACHE.get(query);
 
   try {
     // Step 1: search for the article title
@@ -43,11 +47,13 @@ export async function fetchWikiSummary(placeName, context = '') {
     if (sum.type === 'disambiguation') return null;
     if (!sum.extract) return null;
 
-    return {
+    const result = {
       extract: sum.extract,
       url: sum.content_urls?.desktop?.page,
       thumbnail: sum.thumbnail?.source || null
     };
+    WIKI_CACHE.set(query, result);
+    return result;
   } catch {
     return null;
   }

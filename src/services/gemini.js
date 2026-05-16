@@ -17,6 +17,7 @@ export async function fetchPlaceDescription(place) {
   }
 
   const { placeId, name, address, types, rating, reviewCount } = place;
+  if (DESC_CACHE.size > 150) DESC_CACHE.clear();
   if (DESC_CACHE.has(placeId)) return DESC_CACHE.get(placeId);
 
   const typeStr = (types || [])

@@ -203,6 +203,8 @@ function WishlistTab({
     setRenameValue(activeList?.name || '');
   }, [activeList?.id, activeList?.name]);
 
+  useEffect(() => () => clearTimeout(longPressTimer.current), []);
+
   function handleChipPointerDown() {
     didLongPress.current = false;
     longPressTimer.current = setTimeout(() => {
@@ -493,7 +495,7 @@ function PlaceDetail({
   const isManual = place.placeId?.startsWith('manual-');
 
   const [details, setDetails] = useState(null);
-  const [wikiData, setWikiData] = useState(place.wiki ?? undefined);
+  const [wikiData, setWikiData] = useState(undefined);
   const [geminiDesc, setGeminiDesc] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(!isManual);
   const [hoursOpen, setHoursOpen] = useState(false);
@@ -503,17 +505,17 @@ function PlaceDetail({
     if (isManual) return;
     let cancelled = false;
     setDetails(null);
+    setWikiData(undefined);
     setGeminiDesc(null);
     setDescExpanded(false);
     setDetailsLoading(true);
-    if (!place.wiki) setWikiData(undefined);
 
     const p1 = fetchPlaceDetails(place.placeId)
       .then((d) => { if (!cancelled) setDetails(d); })
       .catch(() => { if (!cancelled) setDetails(null); });
 
     const p2 = place.wiki
-      ? Promise.resolve()
+      ? Promise.resolve(setWikiData(place.wiki))
       : fetchWikiSummary(place.name, destination)
           .then((w) => { if (!cancelled) setWikiData(w); })
           .catch(() => { if (!cancelled) setWikiData(null); });
@@ -525,8 +527,7 @@ function PlaceDetail({
     Promise.all([p1, p2, p3]).then(() => { if (!cancelled) setDetailsLoading(false); });
 
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [place.placeId]);
+  }, [place.placeId, destination]);
 
   const wikiExtract = wikiData?.extract ?? place.wiki?.extract ?? null;
   const wikiUrl = wikiData?.url ?? place.wiki?.url ?? null;
@@ -638,7 +639,7 @@ function PlaceDetail({
               <div className="detail-review-header">
                 <span className="detail-review-author">{r.author}</span>
                 <span className="detail-review-meta">
-                  {'★'.repeat(r.rating ?? 0)}{r.time ? ` · ${r.time}` : ''}
+                  {'★'.repeat(Math.floor(r.rating ?? 0))}{r.time ? ` · ${r.time}` : ''}
                 </span>
               </div>
               {r.text && (

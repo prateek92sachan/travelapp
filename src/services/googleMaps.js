@@ -371,6 +371,81 @@ export function directionsUrl({ lat, lng, name }) {
   return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
 }
 
+// ---- Place Details (New) -------------------------------------------------
+
+const PLACE_DETAILS_CACHE = new Map();
+const detailsInFlight = new Map();
+
+const PRICE_LEVEL_MAP = {
+  PRICE_LEVEL_FREE: 'Free',
+  PRICE_LEVEL_INEXPENSIVE: '$',
+  PRICE_LEVEL_MODERATE: '$$',
+  PRICE_LEVEL_EXPENSIVE: '$$$',
+  PRICE_LEVEL_VERY_EXPENSIVE: '$$$$'
+};
+
+/**
+ * Fetch rich details for a single place: hours, phone, website, reviews,
+ * price level, editorial summary, and extra photos.
+ * Results are cached for the session; concurrent calls for the same placeId
+ * share one in-flight request instead of racing.
+ */
+export async function fetchPlaceDetails(placeId) {
+  if (PLACE_DETAILS_CACHE.has(placeId)) return PLACE_DETAILS_CACHE.get(placeId);
+  if (detailsInFlight.has(placeId)) return detailsInFlight.get(placeId);
+
+  const fields = [
+    'currentOpeningHours',
+    'internationalPhoneNumber',
+    'websiteUri',
+    'reviews',
+    'photos',
+    'priceLevel',
+    'editorialSummary'
+  ].join(',');
+
+  const promise = (async () => {
+    try {
+      const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
+        headers: {
+          'X-Goog-Api-Key': GOOGLE_MAPS_KEY,
+          'X-Goog-FieldMask': fields
+        }
+      });
+
+      if (!res.ok) throw new Error(`Place details ${res.status}`);
+      const data = await res.json();
+
+      const details = {
+        openNow: data.currentOpeningHours?.openNow ?? null,
+        weekdayHours: data.currentOpeningHours?.weekdayDescriptions || [],
+        phone: data.internationalPhoneNumber || null,
+        website: data.websiteUri || null,
+        priceLevel: PRICE_LEVEL_MAP[data.priceLevel] || null,
+        editorialSummary: data.editorialSummary?.text || null,
+        reviews: (data.reviews || []).slice(0, 3).map((r) => ({
+          author: r.authorAttribution?.displayName || 'Anonymous',
+          rating: r.rating ?? null,
+          text: r.text?.text || '',
+          time: r.relativePublishTimeDescription || ''
+        })),
+        extraPhotos: (data.photos || []).slice(1, 4).map(
+          (p) =>
+            `https://places.googleapis.com/v1/${p.name}/media?maxHeightPx=400&maxWidthPx=600&key=${GOOGLE_MAPS_KEY}`
+        )
+      };
+
+      PLACE_DETAILS_CACHE.set(placeId, details);
+      return details;
+    } finally {
+      detailsInFlight.delete(placeId);
+    }
+  })();
+
+  detailsInFlight.set(placeId, promise);
+  return promise;
+}
+
 // ---- Viewport-aware fetching with cache -----------------------------------
 //
 // When the user pans/zooms the map, we fetch places for the new viewport.

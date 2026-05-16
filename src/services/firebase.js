@@ -44,11 +44,10 @@ export { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectRes
 
 export async function saveUserData(uid, { wishlist, recentTrips }) {
   const db = getDb();
-  await setDoc(
-    doc(db, 'users', uid),
-    { wishlist, recentTrips, updatedAt: Date.now() },
-    { merge: true }
-  );
+  const payload = { updatedAt: Date.now() };
+  if (wishlist !== undefined) payload.wishlist = wishlist;
+  if (recentTrips !== undefined) payload.recentTrips = recentTrips;
+  await setDoc(doc(db, 'users', uid), payload, { merge: true });
 }
 
 export async function loadUserData(uid) {

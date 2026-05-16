@@ -63,9 +63,9 @@ function readInitialFromUrl() {
 }
 
 export function TripProvider({ children }) {
-  const initial = readInitialFromUrl();
-  const [destination, setDestination] = useState(initial.destination);
-  const [date, setDate] = useState(initial.date);
+  const initialRef = useRef(readInitialFromUrl());
+  const [destination, setDestination] = useState(initialRef.current.destination);
+  const [date, setDate] = useState(initialRef.current.date);
   const [coords, setCoords] = useState(null);
   const [weather, setWeather] = useState(null);
   const [lastYearWeather, setLastYearWeather] = useState(null);
@@ -273,6 +273,7 @@ export function TripProvider({ children }) {
     (tabKey) => {
       setActiveTab(tabKey);
       setSelectedPlaceId(null);
+      setSelectedPlace(null);
       // City-wide path: lazy-load the tab's data
       fetchTabIfNeeded(tabKey);
 
@@ -452,7 +453,7 @@ export function TripProvider({ children }) {
 
   // Auto-search on mount if URL had params
   useEffect(() => {
-    if (initial.destination) search();
+    if (initialRef.current.destination) search();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
