@@ -1,13 +1,6 @@
 import { directionsUrl } from '../services/googleMaps';
-
-function shortAddress(addr = '') {
-  const parts = addr
-    .split(', ')
-    .map((p) => p.replace(/\s+\d+$/, '').trim())
-    .filter((p) => p.length > 1 && !/^\d/.test(p));
-  if (parts.length <= 2) return addr;
-  return `${parts[0]}, ${parts[parts.length - 1]}`;
-}
+import { formatCount } from '../utils/format';
+import { shortenAddress } from '../utils/shortenAddress';
 
 export function SavedPlaceCard({ item, onRemove }) {
   return (
@@ -28,7 +21,7 @@ export function SavedPlaceCard({ item, onRemove }) {
         <div className="wishlist-place-top">
           <div>
             <div className="wishlist-place-name">{item.name}</div>
-            {item.address && <div className="wishlist-place-address">{shortAddress(item.address)}</div>}
+            {item.address && <div className="wishlist-place-address">{shortenAddress(item.address)}</div>}
           </div>
           <button
             type="button"
@@ -37,7 +30,7 @@ export function SavedPlaceCard({ item, onRemove }) {
             aria-label={`Remove ${item.name} from wishlist`}
             title="Remove from wishlist"
           >
-            x
+            ✕
           </button>
         </div>
 
@@ -82,10 +75,4 @@ function categoryLabel(key) {
     gems: 'Hidden gem'
   };
   return labels[key] || 'Place';
-}
-
-function formatCount(n) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
 }

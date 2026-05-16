@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useTrip } from '../hooks/useTrip';
 import { directionsUrl } from '../services/googleMaps';
 import { withinRadius } from '../utils/geo';
+import { formatCount } from '../utils/format';
 
 const PROXIMITY_KM = 2;
 
@@ -127,10 +128,4 @@ export default function HotelInfoCard() {
       </div>
     </div>
   );
-}
-
-function formatCount(n) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
 }

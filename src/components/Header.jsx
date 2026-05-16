@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Clock, Link2, Heart, Menu, Moon, Sun, LogOut } from 'lucide-react';
+import { Clock, Link2, Heart, Menu, Moon, Sun } from 'lucide-react';
 import { useTrip } from '../hooks/useTrip';
 import { useTheme } from '../hooks/useTheme';
 import { useAuth } from '../hooks/useAuth';
@@ -7,6 +7,8 @@ import { useIsDesktop } from '../hooks/useIsDesktop';
 import { getRecentTrips } from '../utils/recentTrips';
 import SmartSearchInput from './SmartSearchInput';
 import WishlistOverlay from './WishlistOverlay';
+import { useClickOutside } from '../hooks/useClickOutside';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 export default function Header() {
   const { destination, setDestination, date, setDate, search, loading, coords } = useTrip();
@@ -28,37 +30,10 @@ export default function Header() {
     if (recentOpen) setRecents(getRecentTrips());
   }, [recentOpen]);
 
-  useEffect(() => {
-    function onClick(e) {
-      if (recentRef.current && !recentRef.current.contains(e.target)) setRecentOpen(false);
-    }
-    if (recentOpen) document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
-  }, [recentOpen]);
-
-  useEffect(() => {
-    function onClick(e) {
-      if (authMenuRef.current && !authMenuRef.current.contains(e.target)) setAuthMenuOpen(false);
-    }
-    if (authMenuOpen) document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
-  }, [authMenuOpen]);
-
-  useEffect(() => {
-    function onClick(e) {
-      if (hamburgerRef.current && !hamburgerRef.current.contains(e.target)) setHamburgerOpen(false);
-    }
-    if (hamburgerOpen) document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
-  }, [hamburgerOpen]);
-
-  useEffect(() => {
-    function onKey(e) {
-      if (e.key === 'Escape') setWishlistOpen(false);
-    }
-    if (wishlistOpen) document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [wishlistOpen]);
+  useClickOutside(recentRef, recentOpen, () => setRecentOpen(false));
+  useClickOutside(authMenuRef, authMenuOpen, () => setAuthMenuOpen(false));
+  useClickOutside(hamburgerRef, hamburgerOpen, () => setHamburgerOpen(false));
+  useEscapeKey(wishlistOpen, () => setWishlistOpen(false));
 
   // Auto-collapse search on mobile after a successful search
   useEffect(() => {
@@ -118,19 +93,7 @@ export default function Header() {
       await navigator.clipboard.writeText(url);
       showToast('Link copied to clipboard');
     } catch {
-      try {
-        const ta = document.createElement('textarea');
-        ta.value = url;
-        ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
-        document.body.appendChild(ta);
-        ta.focus();
-        ta.select();
-        document.execCommand('copy');
-        ta.remove();
-        showToast('Link copied to clipboard');
-      } catch {
-        showToast('Could not copy link');
-      }
+      showToast('Could not copy link');
     }
   };
 

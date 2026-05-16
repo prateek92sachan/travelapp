@@ -4,6 +4,7 @@ import { Compass, Utensils, Leaf, Gem, Heart, Map } from 'lucide-react';
 import TabbedPlacesWidget from './TabbedPlacesWidget';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { useTrip } from '../hooks/useTrip';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 const MOBILE_TABS = [
   { key: 'activities',  Icon: Compass,  label: 'Activities',  color: '#f97316' },
@@ -31,12 +32,7 @@ export default function PlacesDrawer() {
     return () => document.removeEventListener('mousedown', onClick);
   }, [desktopExpanded]);
 
-  // Esc closes mobile overlay
-  useEffect(() => {
-    function onKey(e) { if (e.key === 'Escape') setMobileExpanded(false); }
-    if (mobileExpanded) document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [mobileExpanded]);
+  useEscapeKey(mobileExpanded, () => setMobileExpanded(false));
 
   // Push a history entry when overlay opens so swipe-back closes it
   // instead of navigating away from the site.

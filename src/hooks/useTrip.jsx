@@ -9,7 +9,6 @@ import {
 } from 'react';
 import {
   geocodeDestination,
-  fetchTopPOIs,
   fetchTopActivities,
   fetchTopRestaurants,
   fetchTopNatureUnique,
@@ -85,7 +84,6 @@ export function TripProvider({ children }) {
     gems: false
   });
   const [activeTab, setActiveTab] = useState('activities');
-  const [pois, setPois] = useState([]); // separate dataset for map markers
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selectedPlaceId, setSelectedPlaceId] = useState(null);
@@ -126,7 +124,6 @@ export function TripProvider({ children }) {
   // a "Search this area" button for manual refresh if auto-refresh is off.
   const [viewportItems, setViewportItems] = useState(null); // null = use tabData
   const [viewportLoading, setViewportLoading] = useState(false);
-  const [viewportCenter, setViewportCenter] = useState(null); // {lat, lng}
 
   // Auth + cloud sync
   const { user, saveToCloud, loadFromCloud } = useAuth();
@@ -135,6 +132,9 @@ export function TripProvider({ children }) {
   const wishlistRef = useRef(wishlist);
 
   const requestSeq = useRef(0);
+  // Stale-request guards for nearby and viewport modes
+  const nearbyRequestSeq = useRef(0);
+  const viewportRequestSeq = useRef(0);
   const tabRequestSeq = useRef({}); // per-tab seqs to handle stale tab fetches
   // Mirror of tabData in a ref so callbacks can read the freshest value
   // without taking tabData as a dependency (which would thrash render).
@@ -144,6 +144,15 @@ export function TripProvider({ children }) {
     nature: null,
     gems: null
   });
+
+  // Refs for stable callbacks that need current destination/coords without
+  // recreating on every keystroke.
+  const destinationRef = useRef(destination);
+  const dateRef = useRef(date);
+  const coordsRef = useRef(null);
+  useEffect(() => { destinationRef.current = destination; }, [destination]);
+  useEffect(() => { dateRef.current = date; }, [date]);
+  useEffect(() => { coordsRef.current = coords; }, [coords]);
 
   // Sync state -> URL (shareable)
   useEffect(() => {
@@ -211,8 +220,8 @@ export function TripProvider({ children }) {
       const fetcher = TAB_FETCHERS[tabKey];
       if (!fetcher) return;
 
-      const localCoords = geo || coords;
-      const localDest = dest || destination;
+      const localCoords = geo || coordsRef.current;
+      const localDest = dest || destinationRef.current;
       if (!localCoords || !localDest) return;
 
       const seq = (tabRequestSeq.current[tabKey] || 0) + 1;
@@ -245,8 +254,8 @@ export function TripProvider({ children }) {
         }
       }
     },
-    // No tabData here on purpose — read via tabDataRef.
-    [coords, destination, writeTabData]
+    // No tabData, coords, or destination here — read via refs.
+    [writeTabData]
   );
 
   // Switching tabs auto-loads if data isn't already there. If we're in
@@ -280,18 +289,18 @@ export function TripProvider({ children }) {
 
   const search = useCallback(
     async (overrides = {}) => {
-      const dest = overrides.destination ?? destination;
-      const dt = overrides.date ?? date;
+      const dest = overrides.destination ?? destinationRef.current;
+      const dt = overrides.date ?? dateRef.current;
 
       if (!dest.trim()) {
         setError('Enter a destination first.');
         return;
       }
 
-      if (overrides.destination && overrides.destination !== destination) {
+      if (overrides.destination && overrides.destination !== destinationRef.current) {
         setDestination(overrides.destination);
       }
-      if (overrides.date && overrides.date !== date) {
+      if (overrides.date && overrides.date !== dateRef.current) {
         setDate(overrides.date);
       }
 
@@ -324,7 +333,6 @@ export function TripProvider({ children }) {
       setNearbyItems({ activities: null, restaurants: null, nature: null, gems: null });
       nearbyRequestSeq.current++;
       setViewportItems(null);
-      setViewportCenter(null);
       viewportRequestSeq.current++;
       // Wipe the API-level viewport cache too — old city's data is irrelevant
       clearViewportCache();
@@ -340,17 +348,14 @@ export function TripProvider({ children }) {
           })
         );
 
-        // Phase 1 (in parallel): current weather + activities (default tab) + POIs (map)
-        const [w, acts, ps] = await Promise.all([
+        // Phase 1 (in parallel): current weather + activities (default tab)
+        const [w, acts] = await Promise.all([
           fetchWeather({ lat: geo.lat, lng: geo.lng, dateISO: dt }),
-          fetchTopActivities({ destination: dest, lat: geo.lat, lng: geo.lng }),
-          fetchTopPOIs({ destination: dest, lat: geo.lat, lng: geo.lng })
+          fetchTopActivities({ destination: dest, lat: geo.lat, lng: geo.lng })
         ]);
         if (myReq !== requestSeq.current) return;
 
         setWeather(w);
-        setPois(ps);
-        // Mark activities tab as loaded (and keep ref in sync)
         writeTabData((prev) => ({ ...prev, activities: acts }));
 
         saveRecentTrip({ destination: dest, date: dt, formattedAddress: geo.formattedAddress });
@@ -387,7 +392,7 @@ export function TripProvider({ children }) {
         if (myReq === requestSeq.current) setLoading(false);
       }
     },
-    [destination, date]
+    [] // reads destination/date via refs; stable across all renders
   );
 
   // Auto-search on mount if URL had params
@@ -416,8 +421,11 @@ export function TripProvider({ children }) {
     }
   }, []);
 
-  const wishlistLists = wishlist.lists || [];
-  const activeWishlistId = wishlist.activeListId || wishlistLists[0]?.id || null;
+  const wishlistLists = useMemo(() => wishlist.lists || [], [wishlist]);
+  const activeWishlistId = useMemo(
+    () => wishlist.activeListId || wishlistLists[0]?.id || null,
+    [wishlist, wishlistLists]
+  );
   const activeWishlist = useMemo(
     () => wishlistLists.find((list) => list.id === activeWishlistId) || null,
     [wishlistLists, activeWishlistId]
@@ -468,30 +476,29 @@ export function TripProvider({ children }) {
   // The cache key is invalidated by `search()` which sets the ref to null
   // — that's how we drop a stale in-flight fetch from a previous city.
   const fetchHotelsIfNeeded = useCallback(async () => {
-    if (!coords) return;
-    const key = `${coords.lat.toFixed(4)},${coords.lng.toFixed(4)}`;
-    if (hotelsLoadedForRef.current === key) return; // already fetched
+    const c = coordsRef.current;
+    if (!c) return;
+    const key = `${c.lat.toFixed(4)},${c.lng.toFixed(4)}`;
+    if (hotelsLoadedForRef.current === key) return;
 
     hotelsLoadedForRef.current = key;
     setHotelsLoading(true);
     try {
       const items = await fetchTopHotels({
-        destination,
-        lat: coords.lat,
-        lng: coords.lng
+        destination: destinationRef.current,
+        lat: c.lat,
+        lng: c.lng
       });
-      // Stale-check: if search() ran while we were awaiting, the ref will
-      // have been reset to null (or to a different city's key).
       if (hotelsLoadedForRef.current !== key) return;
       setHotels(items);
     } catch (e) {
       console.warn('Hotels fetch failed:', e);
-      hotelsLoadedForRef.current = null; // allow retry
+      hotelsLoadedForRef.current = null;
       setHotels([]);
     } finally {
       setHotelsLoading(false);
     }
-  }, [coords, destination]);
+  }, []);
 
   const toggleHotels = useCallback(() => {
     setHotelsOn((prev) => {
@@ -501,11 +508,6 @@ export function TripProvider({ children }) {
       return next;
     });
   }, [fetchHotelsIfNeeded]);
-
-  // Selecting a hotel enters "nearby-mode": refetch all 4 categories within
-  // 2km of the hotel and swap them in. The original city-wide tabData stays
-  // intact so we can restore on exit.
-  const nearbyRequestSeq = useRef(0);
 
   const selectHotel = useCallback(async (hotel) => {
     setSelectedHotelId(hotel?.placeId ?? null);
@@ -575,14 +577,11 @@ export function TripProvider({ children }) {
   // When the map idles (user stopped panning/zooming), refetch places for
   // the active tab's category in the new viewport. Fetches are cached and
   // deduped at the service layer — rapid pans don't multiply API calls.
-  const viewportRequestSeq = useRef(0);
   const refreshViewport = useCallback(
     async ({ lat, lng, radiusMeters }) => {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-      // Don't run viewport refresh while in nearby-mode — they conflict
       if (nearbyAnchor) return;
 
-      setViewportCenter({ lat, lng });
       const seq = ++viewportRequestSeq.current;
       setViewportLoading(true);
 
@@ -647,22 +646,17 @@ export function TripProvider({ children }) {
       weather,
       lastYearWeather,
       events,
-      pois,
       tabData,
       tabLoading,
       activeTab,
       switchTab,
       activeTabItems,
       activeTabLoading,
-      // Back-compat alias for any old callers
-      activities: tabData.activities || [],
       loading,
       error,
       search,
       selectedPlaceId,
-      selectedActivityId: selectedPlaceId, // back-compat
       selectPlace,
-      selectActivity: selectPlace, // back-compat
       wishlist,
       wishlistLists,
       activeWishlist,
@@ -673,7 +667,6 @@ export function TripProvider({ children }) {
       addPlaceToWishlist,
       removePlaceFromWishlist,
       isWishlisted,
-      // Map layers
       mapType,
       setMapType,
       transitOn,
@@ -684,14 +677,11 @@ export function TripProvider({ children }) {
       hotelsLoading,
       selectedHotelId,
       selectHotel,
-      // Nearby-mode (hotel-anchored)
       nearbyAnchor,
       nearbyLoading,
       exitNearbyMode,
-      // Viewport refresh
       viewportItems,
       viewportLoading,
-      viewportCenter,
       refreshViewport,
       clearViewportItems
     }),
@@ -702,7 +692,6 @@ export function TripProvider({ children }) {
       weather,
       lastYearWeather,
       events,
-      pois,
       tabData,
       tabLoading,
       activeTab,
@@ -737,7 +726,6 @@ export function TripProvider({ children }) {
       exitNearbyMode,
       viewportItems,
       viewportLoading,
-      viewportCenter,
       refreshViewport,
       clearViewportItems
     ]

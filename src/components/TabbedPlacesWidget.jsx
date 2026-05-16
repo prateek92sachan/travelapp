@@ -4,15 +4,10 @@ import Card from './Card';
 import { useTrip } from '../hooks/useTrip';
 import { directionsUrl } from '../services/googleMaps';
 import { SavedPlaceCard } from './WishlistPanel';
+import { formatCount } from '../utils/format';
+import { shortenAddress } from '../utils/shortenAddress';
 
-function shortListName(name = '') {
-  const parts = name
-    .split(', ')
-    .map((p) => p.replace(/\s+\d+$/, '').trim())
-    .filter((p) => p.length > 1 && !/^\d/.test(p));
-  if (parts.length <= 2) return name;
-  return `${parts[0]}, ${parts[parts.length - 1]}`;
-}
+const shortListName = shortenAddress;
 
 const PLACE_TABS = [
   { key: 'activities',  label: 'Activities',  Icon: Compass,  color: '#f97316' },
@@ -358,7 +353,7 @@ function PlaceDetail({
           aria-label="Close details"
           style={{ width: 32, height: 32 }}
         >
-          x
+          ✕
         </button>
       </div>
 
@@ -442,12 +437,6 @@ function PlaceDetail({
       </div>
     </div>
   );
-}
-
-function formatCount(n) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
 }
 
 function Skeleton() {

@@ -759,6 +759,7 @@ input { font-family: inherit; }
   padding: 16px 18px;
   border-bottom: 1px solid var(--border);
   gap: 8px;
+  flex-shrink: 0;
 }
 .card-title {
   display: flex;
@@ -993,10 +994,19 @@ input { font-family: inherit; }
 .hourly-cell .tmp { font-size: 14px; font-weight: 600; }
 
 /* ---------- Map ---------- */
+.card.map-card {
+  overflow: clip; /* allow sticky card-header; clip still respects border-radius */
+}
+.map-card .card-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg-elevated);
+}
 .map-container {
   width: 100%;
   height: 100%;
-  min-height: 300px;
+  min-height: 210px;
   position: relative;
 }
 .map-placeholder {
@@ -1762,7 +1772,7 @@ input { font-family: inherit; }
   .main {
     grid-template-columns: 1fr 1fr;
   }
-  .map-card { grid-column: 1 / -1; min-height: 360px; }
+  .map-card { grid-column: 1 / -1; min-height: 252px; }
 }
 
 @media (max-width: 720px) {
@@ -1786,7 +1796,7 @@ input { font-family: inherit; }
     padding: 12px;
     gap: 12px;
   }
-  .map-card { min-height: 320px; }
+  .map-card { min-height: 224px; }
   .card.expanded { inset: 0; border-radius: 0; }
   .weather-temp { font-size: 40px; }
 
@@ -2067,14 +2077,14 @@ input { font-family: inherit; }
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-muted);
-  padding: 4px 10px;
+  padding: 3px 7px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 500;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   white-space: nowrap;
   transition: background var(--transition), border-color var(--transition), color var(--transition);
 }
@@ -2084,9 +2094,9 @@ input { font-family: inherit; }
 }
 .viewport-pill.loading::before {
   content: '';
-  width: 8px;
-  height: 8px;
-  border: 2px solid var(--accent);
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid var(--accent);
   border-top-color: transparent;
   border-radius: 999px;
   animation: spin 800ms linear infinite;
@@ -2113,9 +2123,9 @@ input { font-family: inherit; }
 /* Breakpoint synced with useIsDesktop hook (1024px). Below this, the
    unified bottom bar replaces desktop floating panels. Map stays full-height. */
 @media (max-width: 1023px) {
-  /* Keep map-dominant full-screen on mobile — bar overlays from bottom */
+  /* Map-dominant on mobile: 30% shorter than full-screen so map doesn't dominate */
   .main.main-map-dominant {
-    height: calc(100vh - var(--mobile-header-h, 58px));
+    height: calc(70vh - 40px);
   }
   /* map-card inherits position:absolute; inset:0 from desktop styles */
   .main-map-dominant > .card.map-card {

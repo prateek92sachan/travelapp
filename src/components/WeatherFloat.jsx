@@ -3,18 +3,8 @@ import { createPortal } from 'react-dom';
 import WeatherWidget from './WeatherWidget';
 import { useTrip } from '../hooks/useTrip';
 import { useIsDesktop } from '../hooks/useIsDesktop';
-
-const ICON_MAP = {
-  '01d': '☀️', '01n': '🌙',
-  '02d': '⛅', '02n': '☁️',
-  '03d': '☁️', '03n': '☁️',
-  '04d': '☁️', '04n': '☁️',
-  '09d': '🌧', '09n': '🌧',
-  '10d': '🌦', '10n': '🌧',
-  '11d': '⛈', '11n': '⛈',
-  '13d': '❄️', '13n': '❄️',
-  '50d': '🌫', '50n': '🌫'
-};
+import { useEscapeKey } from '../hooks/useEscapeKey';
+import { emojiFor } from '../utils/weatherIcons';
 
 export default function WeatherFloat() {
   const isDesktop = useIsDesktop();
@@ -22,12 +12,7 @@ export default function WeatherFloat() {
   const [desktopExpanded, setDesktopExpanded] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(false);
 
-  // Esc closes mobile overlay
-  useEffect(() => {
-    function onKey(e) { if (e.key === 'Escape') setMobileExpanded(false); }
-    if (mobileExpanded) document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [mobileExpanded]);
+  useEscapeKey(mobileExpanded, () => setMobileExpanded(false));
 
   // Push history entry so swipe-back closes overlay instead of leaving site
   useEffect(() => {
@@ -43,7 +28,7 @@ export default function WeatherFloat() {
 
   if (!weather) return null;
 
-  const icon = ICON_MAP[weather.icon] || '🌡';
+  const icon = emojiFor(weather.icon);
   const descLong = (weather.description?.length ?? 0) > 9;
 
   if (!isDesktop) {

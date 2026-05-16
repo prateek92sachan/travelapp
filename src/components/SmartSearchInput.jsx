@@ -3,14 +3,14 @@ import { fetchPlacePredictions, newSessionToken } from '../services/googleMaps';
 import { getRecentTrips } from '../utils/recentTrips';
 
 const POPULAR_DESTINATIONS = [
-  'Tokyo, Japan',
-  'Paris, France',
-  'New York, USA',
-  'Bali, Indonesia',
-  'Bangkok, Thailand',
-  'London, UK',
-  'Goa, India',
-  'Dubai, UAE'
+  { id: 'pop-Tokyo', mainText: 'Tokyo', secondaryText: 'Japan', value: 'Tokyo, Japan' },
+  { id: 'pop-Paris', mainText: 'Paris', secondaryText: 'France', value: 'Paris, France' },
+  { id: 'pop-New York', mainText: 'New York', secondaryText: 'USA', value: 'New York, USA' },
+  { id: 'pop-Bali', mainText: 'Bali', secondaryText: 'Indonesia', value: 'Bali, Indonesia' },
+  { id: 'pop-Bangkok', mainText: 'Bangkok', secondaryText: 'Thailand', value: 'Bangkok, Thailand' },
+  { id: 'pop-London', mainText: 'London', secondaryText: 'UK', value: 'London, UK' },
+  { id: 'pop-Goa', mainText: 'Goa', secondaryText: 'India', value: 'Goa, India' },
+  { id: 'pop-Dubai', mainText: 'Dubai', secondaryText: 'UAE', value: 'Dubai, UAE' },
 ];
 
 const DEBOUNCE_MS = 250;
@@ -76,16 +76,7 @@ export default function SmartSearchInput({ value, onChange, onSelect, placeholde
           }))
         );
       }
-      addSection(
-        'popular',
-        'Popular destinations',
-        POPULAR_DESTINATIONS.map((d) => ({
-          id: `pop-${d}`,
-          mainText: d.split(',')[0].trim(),
-          secondaryText: d.split(',').slice(1).join(',').trim(),
-          value: d
-        }))
-      );
+      addSection('popular', 'Popular destinations', POPULAR_DESTINATIONS);
     } else if (predictions.length) {
       addSection(
         'suggestions',

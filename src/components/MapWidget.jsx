@@ -19,7 +19,7 @@ export default function MapWidget() {
   return (
     <Card
       icon="🗺"
-      title={coords ? `Map · ${coords.formattedAddress}` : 'Map'}
+      title="Map"
       className="map-card"
       bodyClassName="no-pad"
       expandable={false}
