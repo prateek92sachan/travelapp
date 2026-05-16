@@ -1,0 +1,753 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react';
+import {
+  geocodeDestination,
+  fetchTopPOIs,
+  fetchTopActivities,
+  fetchTopRestaurants,
+  fetchTopNatureUnique,
+  fetchHiddenGems,
+  fetchTopHotels,
+  fetchPlacesNearPoint,
+  fetchPlacesInViewport,
+  clearViewportCache
+} from '../services/googleMaps';
+import { fetchWeather, fetchLastYearWeather } from '../services/weather';
+import { fetchAnnualEvents } from '../services/events';
+import { enrichWithWiki } from '../services/wikipedia';
+import { saveRecentTrip, getRecentTrips, replaceRecentTrips } from '../utils/recentTrips';
+import {
+  deleteWishlist,
+  ensureWishlistForDestination,
+  getWishlist,
+  isPlaceWishlisted,
+  renameWishlist,
+  removeWishlistPlace,
+  replaceWishlist,
+  saveWishlistPlace,
+  selectWishlist
+} from '../utils/wishlist';
+import { useAuth } from './useAuth';
+
+const TripContext = createContext(null);
+
+// All four tab keys; order matters for default rendering.
+export const TAB_KEYS = ['activities', 'restaurants', 'nature', 'gems'];
+
+// Map a tab key to its fetcher. Centralized so the lazy-loader stays simple.
+const TAB_FETCHERS = {
+  activities: fetchTopActivities,
+  restaurants: fetchTopRestaurants,
+  nature: fetchTopNatureUnique,
+  gems: fetchHiddenGems
+};
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function readInitialFromUrl() {
+  if (typeof window === 'undefined') return { destination: '', date: todayISO() };
+  const u = new URL(window.location.href);
+  return {
+    destination: u.searchParams.get('dest') || '',
+    date: u.searchParams.get('date') || todayISO()
+  };
+}
+
+export function TripProvider({ children }) {
+  const initial = readInitialFromUrl();
+  const [destination, setDestination] = useState(initial.destination);
+  const [date, setDate] = useState(initial.date);
+  const [coords, setCoords] = useState(null);
+  const [weather, setWeather] = useState(null);
+  const [lastYearWeather, setLastYearWeather] = useState(null);
+  const [events, setEvents] = useState([]);
+  // Per-tab data: { activities: [], restaurants: null, nature: null, gems: null }
+  // null = not yet loaded; [] = loaded but empty
+  const [tabData, setTabData] = useState({
+    activities: null,
+    restaurants: null,
+    nature: null,
+    gems: null
+  });
+  const [tabLoading, setTabLoading] = useState({
+    activities: false,
+    restaurants: false,
+    nature: false,
+    gems: false
+  });
+  const [activeTab, setActiveTab] = useState('activities');
+  const [pois, setPois] = useState([]); // separate dataset for map markers
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [selectedPlaceId, setSelectedPlaceId] = useState(null);
+  const [wishlist, setWishlist] = useState(() =>
+    typeof window === 'undefined' ? {} : getWishlist()
+  );
+
+  // ---- Map layer state ----------------------------------------------------
+  // Default: standard map, no transit, hotels off (cleanest first impression)
+  const [mapType, setMapType] = useState('roadmap'); // 'roadmap' | 'satellite' | 'terrain' | 'hybrid'
+  const [transitOn, setTransitOn] = useState(false);
+  const [hotelsOn, setHotelsOn] = useState(false);
+  const [hotels, setHotels] = useState([]);
+  const [hotelsLoading, setHotelsLoading] = useState(false);
+  // When set, the map draws a 2km ring around this hotel and dims markers
+  // outside that ring. Null = no proximity highlight active.
+  const [selectedHotelId, setSelectedHotelId] = useState(null);
+  // Hotels are ref-mirrored too so the lazy-fetcher doesn't churn re-renders
+  const hotelsLoadedForRef = useRef(null); // {lat, lng} we already fetched for
+
+  // ---- Nearby-mode state -------------------------------------------------
+  // When user clicks a hotel, we fetch a fresh slice of places near the hotel
+  // and display those instead of the city-wide markers. nearbyItems is keyed
+  // by tab, so the user can still flip tabs while in nearby-mode.
+  const [nearbyItems, setNearbyItems] = useState({
+    activities: null,
+    restaurants: null,
+    nature: null,
+    gems: null
+  });
+  const [nearbyLoading, setNearbyLoading] = useState(false);
+  // The hotel that anchors nearby-mode; null when not in nearby-mode
+  const [nearbyAnchor, setNearbyAnchor] = useState(null);
+
+  // ---- Viewport refresh state --------------------------------------------
+  // When user pans/zooms, the map's idle event fires viewportChanged.
+  // We track the latest viewport and a "stale" flag so the UI can show
+  // a "Search this area" button for manual refresh if auto-refresh is off.
+  const [viewportItems, setViewportItems] = useState(null); // null = use tabData
+  const [viewportLoading, setViewportLoading] = useState(false);
+  const [viewportCenter, setViewportCenter] = useState(null); // {lat, lng}
+
+  // Auth + cloud sync
+  const { user, saveToCloud, loadFromCloud } = useAuth();
+  const saveToCloudRef = useRef(saveToCloud);
+  const lastSyncedUserRef = useRef(null);
+  const wishlistRef = useRef(wishlist);
+
+  const requestSeq = useRef(0);
+  const tabRequestSeq = useRef({}); // per-tab seqs to handle stale tab fetches
+  // Mirror of tabData in a ref so callbacks can read the freshest value
+  // without taking tabData as a dependency (which would thrash render).
+  const tabDataRef = useRef({
+    activities: null,
+    restaurants: null,
+    nature: null,
+    gems: null
+  });
+
+  // Sync state -> URL (shareable)
+  useEffect(() => {
+    const u = new URL(window.location.href);
+    if (destination) u.searchParams.set('dest', destination);
+    else u.searchParams.delete('dest');
+    if (date) u.searchParams.set('date', date);
+    window.history.replaceState({}, '', u.toString());
+  }, [destination, date]);
+
+  // Keep tabDataRef synced with tabData state so the callback below can
+  // make decisions without depending on tabData (which would thrash render).
+  useEffect(() => {
+    tabDataRef.current = tabData;
+  }, [tabData]);
+
+  useEffect(() => { wishlistRef.current = wishlist; }, [wishlist]);
+  useEffect(() => { saveToCloudRef.current = saveToCloud; }, [saveToCloud]);
+
+  // On sign-in: load from Firestore → restore state; if no cloud data, upload local
+  useEffect(() => {
+    if (!user) { lastSyncedUserRef.current = null; return; }
+    if (lastSyncedUserRef.current === user.uid) return;
+    lastSyncedUserRef.current = user.uid;
+
+    loadFromCloud()
+      .then((cloudData) => {
+        if (!cloudData?.wishlist) {
+          saveToCloud({ wishlist: wishlistRef.current, recentTrips: getRecentTrips() });
+          return;
+        }
+        setWishlist(replaceWishlist(cloudData.wishlist));
+        if (cloudData.recentTrips) replaceRecentTrips(cloudData.recentTrips);
+      })
+      .catch((err) => console.warn('Cloud load on sign-in failed:', err));
+  }, [user, loadFromCloud, saveToCloud]);
+
+  // Debounced cloud save whenever wishlist changes (also ships latest recentTrips)
+  useEffect(() => {
+    if (!user) return;
+    const timer = setTimeout(() => {
+      saveToCloud({ wishlist, recentTrips: getRecentTrips() });
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [wishlist, user, saveToCloud]);
+
+  // ---- Tab lazy-loading ---------------------------------------------------
+
+  // Helper that updates both state and ref in one go. Using this everywhere
+  // keeps tabDataRef trustworthy without needing the useEffect mirror to
+  // tick first.
+  const writeTabData = useCallback((updater) => {
+    setTabData((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      tabDataRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const fetchTabIfNeeded = useCallback(
+    async (tabKey, geo, dest) => {
+      // Read latest tabData via ref — avoids needing it in the deps array.
+      if (tabDataRef.current[tabKey] != null) return;
+
+      const fetcher = TAB_FETCHERS[tabKey];
+      if (!fetcher) return;
+
+      const localCoords = geo || coords;
+      const localDest = dest || destination;
+      if (!localCoords || !localDest) return;
+
+      const seq = (tabRequestSeq.current[tabKey] || 0) + 1;
+      tabRequestSeq.current[tabKey] = seq;
+
+      setTabLoading((prev) => ({ ...prev, [tabKey]: true }));
+      try {
+        const items = await fetcher({
+          destination: localDest,
+          lat: localCoords.lat,
+          lng: localCoords.lng
+        });
+        if (tabRequestSeq.current[tabKey] !== seq) return; // stale
+        writeTabData((prev) => ({ ...prev, [tabKey]: items }));
+
+        // Wikipedia enrichment in the background — catch its own errors
+        enrichWithWiki(items, localDest)
+          .then((enriched) => {
+            if (tabRequestSeq.current[tabKey] !== seq) return;
+            writeTabData((prev) => ({ ...prev, [tabKey]: enriched }));
+          })
+          .catch((err) => console.warn('Wiki enrich failed:', err));
+      } catch (e) {
+        if (tabRequestSeq.current[tabKey] !== seq) return;
+        console.error(`Tab ${tabKey} fetch failed:`, e);
+        writeTabData((prev) => ({ ...prev, [tabKey]: [] }));
+      } finally {
+        if (tabRequestSeq.current[tabKey] === seq) {
+          setTabLoading((prev) => ({ ...prev, [tabKey]: false }));
+        }
+      }
+    },
+    // No tabData here on purpose — read via tabDataRef.
+    [coords, destination, writeTabData]
+  );
+
+  // Switching tabs auto-loads if data isn't already there. If we're in
+  // nearby-mode the tab still affects which nearby category is shown.
+  const switchTab = useCallback(
+    (tabKey) => {
+      setActiveTab(tabKey);
+      setSelectedPlaceId(null);
+      // City-wide path: lazy-load the tab's data
+      fetchTabIfNeeded(tabKey);
+      // Nearby-mode path: if this category isn't pre-fetched yet, fetch it now
+      if (nearbyAnchor && TAB_KEYS.includes(tabKey) && !nearbyItems[tabKey]) {
+        const seq = nearbyRequestSeq.current;
+        fetchPlacesNearPoint({
+          lat: nearbyAnchor.lat,
+          lng: nearbyAnchor.lng,
+          radiusKm: 2,
+          category: tabKey
+        })
+          .then((items) => {
+            if (seq !== nearbyRequestSeq.current) return;
+            setNearbyItems((prev) => ({ ...prev, [tabKey]: items }));
+          })
+          .catch((err) => console.warn('Nearby tab fetch failed:', err));
+      }
+    },
+    [fetchTabIfNeeded, nearbyAnchor, nearbyItems]
+  );
+
+  // ---- Main search --------------------------------------------------------
+
+  const search = useCallback(
+    async (overrides = {}) => {
+      const dest = overrides.destination ?? destination;
+      const dt = overrides.date ?? date;
+
+      if (!dest.trim()) {
+        setError('Enter a destination first.');
+        return;
+      }
+
+      if (overrides.destination && overrides.destination !== destination) {
+        setDestination(overrides.destination);
+      }
+      if (overrides.date && overrides.date !== date) {
+        setDate(overrides.date);
+      }
+
+      const myReq = ++requestSeq.current;
+      setLoading(true);
+      setError(null);
+      setSelectedPlaceId(null);
+
+      // Bump every per-tab seq so any in-flight fetch from the previous
+      // destination resolves stale and is ignored. (Critical: a user-clicked
+      // tab from the prior city must not write its data into the new city's
+      // slot when it eventually returns.)
+      TAB_KEYS.forEach((k) => {
+        tabRequestSeq.current[k] = (tabRequestSeq.current[k] || 0) + 1;
+      });
+
+      // Reset all tab data on new search — old destination's data is invalid
+      const cleared = { activities: null, restaurants: null, nature: null, gems: null };
+      writeTabData(cleared);
+      setActiveTab('activities');
+      setLastYearWeather(null);
+      setEvents([]);
+      // Hotels are city-specific — wipe and re-fetch on next toggle
+      setHotels([]);
+      setSelectedHotelId(null);
+      hotelsLoadedForRef.current = null;
+
+      // Exit nearby-mode and clear viewport overrides on new search
+      setNearbyAnchor(null);
+      setNearbyItems({ activities: null, restaurants: null, nature: null, gems: null });
+      nearbyRequestSeq.current++;
+      setViewportItems(null);
+      setViewportCenter(null);
+      viewportRequestSeq.current++;
+      // Wipe the API-level viewport cache too — old city's data is irrelevant
+      clearViewportCache();
+
+      try {
+        const geo = await geocodeDestination(dest);
+        if (myReq !== requestSeq.current) return;
+        setCoords(geo);
+        setWishlist(
+          ensureWishlistForDestination({
+            name: dest,
+            destination: geo.formattedAddress || dest
+          })
+        );
+
+        // Phase 1 (in parallel): current weather + activities (default tab) + POIs (map)
+        const [w, acts, ps] = await Promise.all([
+          fetchWeather({ lat: geo.lat, lng: geo.lng, dateISO: dt }),
+          fetchTopActivities({ destination: dest, lat: geo.lat, lng: geo.lng }),
+          fetchTopPOIs({ destination: dest, lat: geo.lat, lng: geo.lng })
+        ]);
+        if (myReq !== requestSeq.current) return;
+
+        setWeather(w);
+        setPois(ps);
+        // Mark activities tab as loaded (and keep ref in sync)
+        writeTabData((prev) => ({ ...prev, activities: acts }));
+
+        saveRecentTrip({ destination: dest, date: dt, formattedAddress: geo.formattedAddress });
+        if (saveToCloudRef.current) {
+          saveToCloudRef.current({ wishlist: getWishlist(), recentTrips: getRecentTrips() });
+        }
+
+        // Phase 2 (background, non-blocking): last-year weather + annual events
+        // + wiki for activities. Each is independently caught so one failure
+        // doesn't sink the others. The outer .catch is a final safety net.
+        Promise.allSettled([
+          fetchLastYearWeather({ lat: geo.lat, lng: geo.lng, dateISO: dt }),
+          fetchAnnualEvents(dest, dt),
+          enrichWithWiki(acts, dest)
+        ])
+          .then(([lywRes, evRes, enrichedRes]) => {
+            if (myReq !== requestSeq.current) return;
+            if (lywRes.status === 'fulfilled' && lywRes.value) {
+              setLastYearWeather(lywRes.value);
+            }
+            if (evRes.status === 'fulfilled' && evRes.value?.length) {
+              setEvents(evRes.value);
+            }
+            if (enrichedRes.status === 'fulfilled' && enrichedRes.value) {
+              writeTabData((prev) => ({ ...prev, activities: enrichedRes.value }));
+            }
+          })
+          .catch((err) => console.warn('Phase 2 enrichment error:', err));
+      } catch (e) {
+        if (myReq !== requestSeq.current) return;
+        console.error(e);
+        setError(e.message || 'Something went wrong fetching trip data.');
+      } finally {
+        if (myReq === requestSeq.current) setLoading(false);
+      }
+    },
+    [destination, date]
+  );
+
+  // Auto-search on mount if URL had params
+  useEffect(() => {
+    if (initial.destination) search();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ---- Selection (cross-tab) ---------------------------------------------
+
+  const selectPlace = useCallback((place) => {
+    setSelectedPlaceId(place?.placeId ?? null);
+    // Clear any active hotel highlight when picking a regular place
+    setSelectedHotelId(null);
+    if (place) {
+      window.dispatchEvent(
+        new CustomEvent('travelapp:focusLocation', {
+          detail: {
+            lat: place.lat,
+            lng: place.lng,
+            placeId: place.placeId,
+            name: place.name
+          }
+        })
+      );
+    }
+  }, []);
+
+  const wishlistLists = wishlist.lists || [];
+  const activeWishlistId = wishlist.activeListId || wishlistLists[0]?.id || null;
+  const activeWishlist = useMemo(
+    () => wishlistLists.find((list) => list.id === activeWishlistId) || null,
+    [wishlistLists, activeWishlistId]
+  );
+
+  const addPlaceToWishlist = useCallback(
+    (place, category, listId = activeWishlistId) => {
+      if (!listId || !place) return;
+      const next = saveWishlistPlace({
+        listId,
+        place,
+        category
+      });
+      setWishlist(next);
+    },
+    [activeWishlistId]
+  );
+
+  const removePlaceFromWishlist = useCallback(
+    (placeId, listId = activeWishlistId) => {
+      if (!listId || !placeId) return;
+      setWishlist(removeWishlistPlace({ listId, placeId }));
+    },
+    [activeWishlistId]
+  );
+
+  const selectWishlistById = useCallback((listId) => {
+    setWishlist(selectWishlist(listId));
+  }, []);
+
+  const renameWishlistById = useCallback((listId, name) => {
+    setWishlist(renameWishlist({ listId, name }));
+  }, []);
+
+  const deleteWishlistById = useCallback((listId) => {
+    setWishlist(deleteWishlist(listId));
+  }, []);
+
+  const isWishlisted = useCallback(
+    (placeId, listId = activeWishlistId) => isPlaceWishlisted(wishlist, listId, placeId),
+    [wishlist, activeWishlistId]
+  );
+
+  // ---- Hotels (map-only layer) -------------------------------------------
+
+  // Lazy-fetch hotels the first time the user toggles them on for a given
+  // destination. Caches by lat/lng key so toggling on/off doesn't refetch.
+  // The cache key is invalidated by `search()` which sets the ref to null
+  // — that's how we drop a stale in-flight fetch from a previous city.
+  const fetchHotelsIfNeeded = useCallback(async () => {
+    if (!coords) return;
+    const key = `${coords.lat.toFixed(4)},${coords.lng.toFixed(4)}`;
+    if (hotelsLoadedForRef.current === key) return; // already fetched
+
+    hotelsLoadedForRef.current = key;
+    setHotelsLoading(true);
+    try {
+      const items = await fetchTopHotels({
+        destination,
+        lat: coords.lat,
+        lng: coords.lng
+      });
+      // Stale-check: if search() ran while we were awaiting, the ref will
+      // have been reset to null (or to a different city's key).
+      if (hotelsLoadedForRef.current !== key) return;
+      setHotels(items);
+    } catch (e) {
+      console.warn('Hotels fetch failed:', e);
+      hotelsLoadedForRef.current = null; // allow retry
+      setHotels([]);
+    } finally {
+      setHotelsLoading(false);
+    }
+  }, [coords, destination]);
+
+  const toggleHotels = useCallback(() => {
+    setHotelsOn((prev) => {
+      const next = !prev;
+      if (next) fetchHotelsIfNeeded();
+      else setSelectedHotelId(null); // turning off clears the highlight
+      return next;
+    });
+  }, [fetchHotelsIfNeeded]);
+
+  // Selecting a hotel enters "nearby-mode": refetch all 4 categories within
+  // 2km of the hotel and swap them in. The original city-wide tabData stays
+  // intact so we can restore on exit.
+  const nearbyRequestSeq = useRef(0);
+
+  const selectHotel = useCallback(async (hotel) => {
+    setSelectedHotelId(hotel?.placeId ?? null);
+
+    if (!hotel) {
+      // Exit nearby-mode
+      setNearbyAnchor(null);
+      setNearbyItems({ activities: null, restaurants: null, nature: null, gems: null });
+      return;
+    }
+
+    setNearbyAnchor(hotel);
+    setNearbyLoading(true);
+    setNearbyItems({ activities: null, restaurants: null, nature: null, gems: null });
+
+    const seq = ++nearbyRequestSeq.current;
+    try {
+      const acts = await fetchPlacesNearPoint({
+        lat: hotel.lat,
+        lng: hotel.lng,
+        radiusKm: 2,
+        category: 'activities'
+      });
+      if (seq !== nearbyRequestSeq.current) return; // stale
+      setNearbyItems((prev) => ({ ...prev, activities: acts }));
+
+      // Background-fetch the other categories so tab switches feel instant
+      Promise.all([
+        fetchPlacesNearPoint({ lat: hotel.lat, lng: hotel.lng, radiusKm: 2, category: 'restaurants' }),
+        fetchPlacesNearPoint({ lat: hotel.lat, lng: hotel.lng, radiusKm: 2, category: 'nature' }),
+        fetchPlacesNearPoint({ lat: hotel.lat, lng: hotel.lng, radiusKm: 2, category: 'gems' })
+      ])
+        .then(([rests, nat, gms]) => {
+          if (seq !== nearbyRequestSeq.current) return;
+          setNearbyItems((prev) => ({
+            ...prev,
+            restaurants: rests,
+            nature: nat,
+            gems: gms
+          }));
+        })
+        .catch((err) => console.warn('Nearby background fetch failed:', err));
+    } catch (e) {
+      if (seq !== nearbyRequestSeq.current) return;
+      console.warn('Nearby fetch failed:', e);
+    } finally {
+      // Always clear the loading flag if we're still the latest request —
+      // including the stale-bail path, otherwise the spinner sticks.
+      if (seq === nearbyRequestSeq.current) setNearbyLoading(false);
+    }
+  }, []);
+
+  const exitNearbyMode = useCallback(() => {
+    nearbyRequestSeq.current++; // invalidate any in-flight nearby fetches
+    setSelectedHotelId(null);
+    setNearbyAnchor(null);
+    setNearbyItems({ activities: null, restaurants: null, nature: null, gems: null });
+    // Also clear any stale viewport-mode data so the user lands cleanly
+    // back on city tabData rather than on a previous pan's results.
+    viewportRequestSeq.current++;
+    setViewportItems(null);
+    setViewportLoading(false);
+  }, []);
+
+  // ---- Viewport refresh -------------------------------------------------
+  //
+  // When the map idles (user stopped panning/zooming), refetch places for
+  // the active tab's category in the new viewport. Fetches are cached and
+  // deduped at the service layer — rapid pans don't multiply API calls.
+  const viewportRequestSeq = useRef(0);
+  const refreshViewport = useCallback(
+    async ({ lat, lng, radiusMeters }) => {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      // Don't run viewport refresh while in nearby-mode — they conflict
+      if (nearbyAnchor) return;
+
+      setViewportCenter({ lat, lng });
+      const seq = ++viewportRequestSeq.current;
+      setViewportLoading(true);
+
+      try {
+        const items = await fetchPlacesInViewport({
+          lat,
+          lng,
+          radiusMeters: radiusMeters || 5000,
+          category: activeTab
+        });
+        if (seq !== viewportRequestSeq.current) return;
+        setViewportItems(items);
+      } catch (e) {
+        if (seq !== viewportRequestSeq.current) return;
+        console.warn('Viewport refresh failed:', e);
+      } finally {
+        if (seq === viewportRequestSeq.current) setViewportLoading(false);
+      }
+    },
+    [activeTab, nearbyAnchor]
+  );
+
+  const clearViewportItems = useCallback(() => {
+    viewportRequestSeq.current++;
+    setViewportItems(null);
+    setViewportLoading(false);
+  }, []);
+
+  // Derive: items for the currently-active tab. Map widget reads from this.
+  // Priority order:
+  //   1. Nearby-mode items (hotel selected)        → "near this hotel"
+  //   2. Viewport items (user has zoomed/panned)   → "in this area"
+  //   3. Normal tab data                            → "in this city"
+  const activeTabItems = useMemo(() => {
+    if (!TAB_KEYS.includes(activeTab)) {
+      return [];
+    }
+    if (nearbyAnchor) {
+      return nearbyItems[activeTab] || [];
+    }
+    if (viewportItems) {
+      return viewportItems;
+    }
+    return tabData[activeTab] || [];
+  }, [nearbyAnchor, nearbyItems, viewportItems, tabData, activeTab]);
+
+  // Loading state should reflect whichever data source is currently active.
+  const activeTabLoading =
+    TAB_KEYS.includes(activeTab) &&
+    ((nearbyAnchor && nearbyLoading) ||
+      viewportLoading ||
+      tabLoading[activeTab] ||
+      false);
+
+  const value = useMemo(
+    () => ({
+      destination,
+      setDestination,
+      date,
+      setDate,
+      coords,
+      weather,
+      lastYearWeather,
+      events,
+      pois,
+      tabData,
+      tabLoading,
+      activeTab,
+      switchTab,
+      activeTabItems,
+      activeTabLoading,
+      // Back-compat alias for any old callers
+      activities: tabData.activities || [],
+      loading,
+      error,
+      search,
+      selectedPlaceId,
+      selectedActivityId: selectedPlaceId, // back-compat
+      selectPlace,
+      selectActivity: selectPlace, // back-compat
+      wishlist,
+      wishlistLists,
+      activeWishlist,
+      activeWishlistId,
+      selectWishlistById,
+      renameWishlistById,
+      deleteWishlistById,
+      addPlaceToWishlist,
+      removePlaceFromWishlist,
+      isWishlisted,
+      // Map layers
+      mapType,
+      setMapType,
+      transitOn,
+      setTransitOn,
+      hotelsOn,
+      toggleHotels,
+      hotels,
+      hotelsLoading,
+      selectedHotelId,
+      selectHotel,
+      // Nearby-mode (hotel-anchored)
+      nearbyAnchor,
+      nearbyLoading,
+      exitNearbyMode,
+      // Viewport refresh
+      viewportItems,
+      viewportLoading,
+      viewportCenter,
+      refreshViewport,
+      clearViewportItems
+    }),
+    [
+      destination,
+      date,
+      coords,
+      weather,
+      lastYearWeather,
+      events,
+      pois,
+      tabData,
+      tabLoading,
+      activeTab,
+      switchTab,
+      activeTabItems,
+      activeTabLoading,
+      loading,
+      error,
+      search,
+      selectedPlaceId,
+      selectPlace,
+      wishlist,
+      wishlistLists,
+      activeWishlist,
+      activeWishlistId,
+      selectWishlistById,
+      renameWishlistById,
+      deleteWishlistById,
+      addPlaceToWishlist,
+      removePlaceFromWishlist,
+      isWishlisted,
+      mapType,
+      transitOn,
+      hotelsOn,
+      toggleHotels,
+      hotels,
+      hotelsLoading,
+      selectedHotelId,
+      selectHotel,
+      nearbyAnchor,
+      nearbyLoading,
+      exitNearbyMode,
+      viewportItems,
+      viewportLoading,
+      viewportCenter,
+      refreshViewport,
+      clearViewportItems
+    ]
+  );
+
+  return <TripContext.Provider value={value}>{children}</TripContext.Provider>;
+}
+
+export function useTrip() {
+  const ctx = useContext(TripContext);
+  if (!ctx) throw new Error('useTrip must be used inside TripProvider');
+  return ctx;
+}

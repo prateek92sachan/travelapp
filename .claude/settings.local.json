@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Recurse \"C:\\\\Personal\\\\Gemini\\\\Projects\\\\Travel APP v2\" -Name)",
+      "Bash(Select-Object -First 200)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Personal\\\\Gemini\\\\Projects\\\\Travel APP v2\" -Recurse -File)",
+      "Bash(Select-Object FullName)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(npm run *)",
+      "Bash(npm install *)",
+      "Bash(git init *)",
+      "Bash(git add *)"
+    ]
+  }
+}
