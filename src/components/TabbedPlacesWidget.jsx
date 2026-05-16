@@ -140,7 +140,6 @@ export default function TabbedPlacesWidget({ expandable = true }) {
                   index={i}
                   selected={selectedPlaceId === a.placeId}
                   onSelect={() => selectPlace(a)}
-                  category={activeTab}
                   saved={isWishlisted(a.placeId)}
                   activeListName={shortListName(activeWishlist?.name)}
                   onSave={() => addPlaceToWishlist(a, activeTab)}
@@ -156,7 +155,6 @@ export default function TabbedPlacesWidget({ expandable = true }) {
         <PlaceDetail
           place={selected}
           onClose={() => selectPlace(null)}
-          category={activeTab}
           saved={isWishlisted(selected.placeId)}
           activeListName={shortListName(activeWishlist?.name)}
           onSave={() => addPlaceToWishlist(selected, activeTab)}
@@ -400,7 +398,6 @@ function PlaceRow({
   index: i,
   selected,
   onSelect,
-  category,
   saved,
   activeListName,
   onSave,
@@ -480,13 +477,6 @@ function PlaceRow({
   );
 }
 
-function truncateExtract(text, maxLen = 280) {
-  if (!text || text.length <= maxLen) return text;
-  const cut = text.slice(0, maxLen);
-  const dot = cut.lastIndexOf('. ');
-  return dot > 60 ? cut.slice(0, dot + 1) : cut.trim() + '…';
-}
-
 function hostnameOf(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
 }
@@ -494,7 +484,6 @@ function hostnameOf(url) {
 function PlaceDetail({
   place,
   onClose,
-  category,
   saved,
   activeListName,
   onSave,
