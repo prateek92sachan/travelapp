@@ -105,7 +105,7 @@ function MapInner({ center, hotels, mapType, visibleCategories, toggleCategory, 
         defaultCenter={{ lat: center.lat, lng: center.lng }}
         defaultZoom={12}
         mapTypeId={mapType}
-        mapId={GOOGLE_MAPS_MAP_ID || null}
+        mapId={GOOGLE_MAPS_MAP_ID || undefined}
         gestureHandling="greedy"
         disableDefaultUI={false}
         mapTypeControl={false}
