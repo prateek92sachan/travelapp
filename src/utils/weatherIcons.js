@@ -1,4 +1,4 @@
-export const ICON_MAP = {
+const ICON_MAP = {
   '01d': '☀️', '01n': '🌙',
   '02d': '⛅', '02n': '☁️',
   '03d': '☁️', '03n': '☁️',

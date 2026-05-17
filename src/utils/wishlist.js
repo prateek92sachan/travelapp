@@ -63,25 +63,6 @@ export function getWishlist() {
   return normalize(safeParse(localStorage.getItem(KEY)));
 }
 
-export function createWishlist({ name, destination }) {
-  const wishlist = getWishlist();
-  const trimmed = name?.trim() || destination?.trim() || 'Untitled wishlist';
-  const list = {
-    id: makeId(),
-    name: trimmed,
-    destination: destination || '',
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    items: []
-  };
-
-  return persist({
-    ...wishlist,
-    activeListId: list.id,
-    lists: [list, ...wishlist.lists]
-  });
-}
-
 export function ensureWishlistForDestination({ name, destination }) {
   const wishlist = getWishlist();
   const trimmedDestination = destination?.trim() || name?.trim() || 'Untitled wishlist';

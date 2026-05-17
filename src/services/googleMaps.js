@@ -17,7 +17,9 @@ export async function geocodeDestination(destination) {
     `?address=${encodeURIComponent(destination)}` +
     `&key=${GOOGLE_MAPS_KEY}`;
 
-  const res = await fetch(url);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  const res = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
   if (!res.ok) throw new Error(`Geocoding failed: ${res.status}`);
   const data = await res.json();
 
@@ -47,6 +49,30 @@ export async function geocodeDestination(destination) {
     viewportNE: vp ? { lat: vp.northeast.lat, lng: vp.northeast.lng } : null,
     viewportSW: vp ? { lat: vp.southwest.lat, lng: vp.southwest.lng } : null
   };
+}
+
+// Reverse geocode a lat/lng to a city name (locality or admin level 2).
+// Returns null on failure — always safe to ignore.
+export async function reverseGeocodeCity({ lat, lng }) {
+  const url =
+    `https://maps.googleapis.com/maps/api/geocode/json` +
+    `?latlng=${lat},${lng}` +
+    `&result_type=locality|administrative_area_level_2` +
+    `&key=${GOOGLE_MAPS_KEY}`;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.status !== 'OK' || !data.results?.length) return null;
+    const components = data.results[0].address_components || [];
+    const locality = components.find((c) => c.types.includes('locality'));
+    const level2 = components.find((c) => c.types.includes('administrative_area_level_2'));
+    return locality?.long_name || level2?.long_name || null;
+  } catch {
+    return null;
+  }
 }
 
 // ---- Places (New) Text Search ---------------------------------------------
@@ -412,12 +438,15 @@ export async function fetchPlaceDetails(placeId) {
 
   const promise = (async () => {
     try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
       const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
         headers: {
           'X-Goog-Api-Key': GOOGLE_MAPS_KEY,
           'X-Goog-FieldMask': fields
-        }
-      });
+        },
+        signal: controller.signal
+      }).finally(() => clearTimeout(timer));
 
       if (!res.ok) throw new Error(`Place details ${res.status}`);
       const data = await res.json();
@@ -478,14 +507,16 @@ const CATEGORY_QUERIES = {
   activities: 'things to do and activities',
   restaurants: 'best restaurants',
   nature: 'natural attractions parks scenic spots and unique places',
-  gems: 'hidden gems and lesser-known places'
+  gems: 'hidden gems and lesser-known places',
+  hotels: 'top rated hotels and resorts'
 };
 
 const CATEGORY_FILTERS = {
   activities: { minRating: 4.0, minReviews: 30 },
   restaurants: { minRating: 4.2, minReviews: 100 },
   nature: { minRating: 4.0, minReviews: 50 },
-  gems: { minRating: 4.5, minReviews: 100, maxReviews: 2000 }
+  gems: { minRating: 4.5, minReviews: 100, maxReviews: 2000 },
+  hotels: { minRating: 4.0, minReviews: 50 }
 };
 
 /**
@@ -528,9 +559,14 @@ export async function fetchPlacesInViewport({
         fetchCount: 20
       });
 
+      const LODGING_TYPES = ['lodging', 'hotel', 'resort_hotel', 'extended_stay_hotel'];
       const customFilter = (p) => {
         const types = p.types || [];
-        if (types.some((t) => NOISE_TYPES.has(t))) return false;
+        if (category === 'hotels') {
+          if (!types.some((t) => LODGING_TYPES.includes(t))) return false;
+        } else {
+          if (types.some((t) => NOISE_TYPES.has(t))) return false;
+        }
         const rating = p.rating ?? 0;
         const reviews = p.userRatingCount ?? 0;
         if (rating < filterOpts.minRating) return false;

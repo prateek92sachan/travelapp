@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { Compass, Utensils, Leaf, Gem, Heart, Navigation, Phone, Globe } from 'lucide-react';
+import { Compass, Utensils, Leaf, Gem, BedDouble, Heart, Navigation, Phone, Globe } from 'lucide-react';
 import Card from './Card';
 import { useTrip } from '../hooks/useTrip';
 import { directionsUrl, fetchPlaceDetails } from '../services/googleMaps';
@@ -11,14 +11,49 @@ import { shortenAddress } from '../utils/shortenAddress';
 
 const shortListName = shortenAddress;
 
+const TabNav = memo(function TabNav({ activeTab, tabs, onSwitch }) {
+  const navRef = useRef(null);
+
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const btn = nav.querySelector(`[data-tab="${activeTab}"]`);
+    if (btn) btn.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+  }, [activeTab]);
+
+  return (
+    <div className="tab-nav" role="tablist" ref={navRef}>
+      {tabs.map((t) => {
+        const isActive = activeTab === t.key;
+        return (
+          <button
+            key={t.key}
+            role="tab"
+            type="button"
+            data-tab={t.key}
+            aria-selected={isActive}
+            className={`tab-button ${isActive ? 'active' : ''}`}
+            title={t.label}
+            onClick={() => onSwitch(t.key)}
+          >
+            <t.Icon size={14} strokeWidth={2} aria-hidden color={t.color} />
+            {isActive && <span>{t.label}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}, (prev, next) => prev.activeTab === next.activeTab && prev.tabs === next.tabs);
+
 const PLACE_TABS = [
-  { key: 'activities',  label: 'Activities',  Icon: Compass,  color: '#f97316' },
-  { key: 'restaurants', label: 'Restaurants', Icon: Utensils, color: '#ef4444' },
-  { key: 'nature',      label: 'Nature',      Icon: Leaf,     color: '#22c55e' },
-  { key: 'gems',        label: 'Hidden gems', Icon: Gem,      color: '#6366f1' },
+  { key: 'activities',  label: 'Activities',  Icon: Compass,   color: '#f97316' },
+  { key: 'restaurants', label: 'Restaurants', Icon: Utensils,  color: '#ef4444' },
+  { key: 'nature',      label: 'Nature',      Icon: Leaf,      color: '#22c55e' },
+  { key: 'gems',        label: 'Hidden gems', Icon: Gem,       color: '#6366f1' },
+  { key: 'hotels',      label: 'Hotels',      Icon: BedDouble, color: '#0ea5e9' },
 ];
 
-export default function TabbedPlacesWidget({ expandable = true }) {
+function TabbedPlacesWidget({ expandable = true }) {
   const {
     activeTab,
     switchTab,
@@ -34,9 +69,16 @@ export default function TabbedPlacesWidget({ expandable = true }) {
     renameWishlistById,
     deleteWishlistById,
     addPlaceToWishlist,
+    addPlaceToSmartWishlist,
     removePlaceFromWishlist,
     isWishlisted,
+    effectiveListId,
+    viewportCity,
   } = useTrip();
+
+  const saveListName = viewportCity
+    ? shortListName(viewportCity)
+    : shortListName(activeWishlist?.name);
 
   // Use selectedPlace directly — avoids the card vanishing when tab switches
   // before activeTabItems updates, or when data hasn't loaded yet.
@@ -121,21 +163,7 @@ export default function TabbedPlacesWidget({ expandable = true }) {
           </div>
         }
         stickyNav={
-          <div className="tab-nav" role="tablist">
-            {PLACE_TABS.map((t) => (
-              <button
-                key={t.key}
-                role="tab"
-                type="button"
-                aria-selected={activeTab === t.key}
-                className={`tab-button ${activeTab === t.key ? 'active' : ''}`}
-                onClick={() => switchTab(t.key)}
-              >
-                <t.Icon size={14} strokeWidth={2} aria-hidden color={t.color} />
-                <span>{t.label}</span>
-              </button>
-            ))}
-          </div>
+          <TabNav activeTab={activeTab} tabs={PLACE_TABS} onSwitch={switchTab} />
         }
       >
         <div className="tab-panel" role="tabpanel">
@@ -164,10 +192,10 @@ export default function TabbedPlacesWidget({ expandable = true }) {
                   index={i}
                   selected={selectedPlaceId === a.placeId}
                   onSelect={() => selectPlace(a)}
-                  saved={isWishlisted(a.placeId)}
-                  activeListName={shortListName(activeWishlist?.name)}
-                  onSave={() => addPlaceToWishlist(a, activeTab)}
-                  onRemove={() => removePlaceFromWishlist(a.placeId)}
+                  saved={isWishlisted(a.placeId, effectiveListId)}
+                  activeListName={saveListName}
+                  onSave={() => addPlaceToSmartWishlist(a, activeTab)}
+                  onRemove={() => removePlaceFromWishlist(a.placeId, effectiveListId)}
                 />
               ))}
             </div>
@@ -179,10 +207,10 @@ export default function TabbedPlacesWidget({ expandable = true }) {
         <PlaceDetail
           place={selected}
           onClose={() => selectPlace(null)}
-          saved={isWishlisted(selected.placeId)}
-          activeListName={shortListName(activeWishlist?.name)}
-          onSave={() => addPlaceToWishlist(selected, activeTab)}
-          onRemove={() => removePlaceFromWishlist(selected.placeId)}
+          saved={isWishlisted(selected.placeId, effectiveListId)}
+          activeListName={saveListName}
+          onSave={() => addPlaceToSmartWishlist(selected, activeTab)}
+          onRemove={() => removePlaceFromWishlist(selected.placeId, effectiveListId)}
         />
       )}
     </>
@@ -515,7 +543,7 @@ function hostnameOf(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
 }
 
-function PlaceDetail({
+const PlaceDetail = memo(function PlaceDetail({
   place,
   onClose,
   saved,
@@ -699,7 +727,11 @@ function PlaceDetail({
       </div>
     </div>
   );
-}
+}, (prev, next) =>
+  prev.place === next.place &&
+  prev.saved === next.saved &&
+  prev.activeListName === next.activeListName
+);
 
 function first30Words(text) {
   const words = text.trim().split(/\s+/);
@@ -737,3 +769,5 @@ function Skeleton() {
     </div>
   );
 }
+
+export default memo(TabbedPlacesWidget);

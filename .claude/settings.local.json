@@ -11,7 +11,28 @@
       "Bash(git init *)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git config *)"
+      "Bash(git config *)",
+      "Bash(git tag *)",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(node -e \"const p=require\\('./node_modules/@vis.gl/react-google-maps/package.json'\\); console.log\\(p.version\\)\")",
+      "Bash(git commit -m 'fix: pass undefined mapId instead of null when not configured *)",
+      "Bash(git commit -m 'fix: suppress AbortError from Firebase in StrictMode dev double-invocation *)",
+      "Read(//c/Users/Prateek Sachan/.claude/plugins/cache/caveman/caveman/84cc3c14fa1e/skills/compress/**)",
+      "Bash(python3 -m scripts \"C:\\\\Personal\\\\Gemini\\\\Projects\\\\Travel APP v2\\\\CLAUDE.md\")",
+      "Bash(findstr /s /r \"useTrip\\(\\)\" \"C:\\\\Personal\\\\Gemini\\\\Projects\\\\Travel APP v2\\\\src\")",
+      "Bash(git commit *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Personal\\\\Gemini\\\\Projects\\\\Travel APP v2\\\\src\" -Recurse -File)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Personal\\\\Gemini\\\\Projects\\\\Travel APP v2\\\\src\" -Recurse -Filter \"*.jsx\" -File)",
+      "WebFetch(domain:localhost)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5174)",
+      "Bash(npx playwright *)",
+      "Bash(ls playwright*)",
+      "Bash(ls tests/)",
+      "Bash(npm list *)",
+      "Bash(where playwright *)",
+      "Bash(del CLAUDE.original.md)"
     ]
   }
 }

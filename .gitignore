@@ -26,3 +26,9 @@ npm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Dev/test artifacts
+dev-dist/
+playwright-report/
+test-results/
+*.mp4

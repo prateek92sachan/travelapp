@@ -48,7 +48,7 @@ export async function fetchPlaceDescription(place) {
       return null;
     }
     let data;
-    try { data = await res.json(); } catch { return null; }
+    try { data = await res.json(); } catch (err) { console.error('[Gemini] JSON parse failed', err); return null; }
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
     if (text) DESC_CACHE.set(placeId, { text, ts: Date.now() });
     return text;

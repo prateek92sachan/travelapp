@@ -29,9 +29,11 @@ export async function fetchWikiSummary(placeName, context = '') {
 
   if (WIKI_CACHE.has(query)) return WIKI_CACHE.get(query);
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
     // Step 1: search for the article title
-    const searchRes = await fetch(WIKI_SEARCH + encodeURIComponent(query));
+    const searchRes = await fetch(WIKI_SEARCH + encodeURIComponent(query), { signal: controller.signal });
     if (!searchRes.ok) return null;
     const searchData = await searchRes.json();
     // openSearch returns [query, [titles], [descriptions], [urls]]
@@ -39,7 +41,7 @@ export async function fetchWikiSummary(placeName, context = '') {
     if (!title) return null;
 
     // Step 2: fetch the summary
-    const sumRes = await fetch(WIKI_REST + encodeURIComponent(title));
+    const sumRes = await fetch(WIKI_REST + encodeURIComponent(title), { signal: controller.signal });
     if (!sumRes.ok) return null;
     const sum = await sumRes.json();
 
@@ -56,6 +58,8 @@ export async function fetchWikiSummary(placeName, context = '') {
     return result;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

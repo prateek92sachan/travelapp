@@ -34,10 +34,6 @@ export function saveRecentTrip({ destination, date, formattedAddress }) {
   }
 }
 
-export function clearRecentTrips() {
-  localStorage.removeItem(KEY);
-}
-
 export function replaceRecentTrips(trips) {
   if (!Array.isArray(trips)) return;
   try {
