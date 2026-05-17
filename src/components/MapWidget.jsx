@@ -152,7 +152,6 @@ function MapInner({ center, hotels, mapType, visibleCategories, toggleCategory, 
         <FocusListener />
         <TransitLayer />
         <ProximityRing center={anchorHotel} radiusKm={PROXIMITY_KM} />
-        <ViewportWatcher centerLat={center.lat} centerLng={center.lng} />
       </Map>
 
       <MapControlsPanel open={controlsOpen} onToggle={onToggleControls} />

@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { Compass, Utensils, Leaf, Gem, Heart, Navigation, Phone, Globe, Sparkles, Loader2 } from 'lucide-react';
+import { Compass, Utensils, Leaf, Gem, Heart, Navigation, Phone, Globe } from 'lucide-react';
 import Card from './Card';
 import { useTrip } from '../hooks/useTrip';
 import { directionsUrl, fetchPlaceDetails } from '../services/googleMaps';
@@ -36,10 +36,6 @@ export default function TabbedPlacesWidget({ expandable = true }) {
     addPlaceToWishlist,
     removePlaceFromWishlist,
     isWishlisted,
-    coords,
-    phase2Loading,
-    phase2Done,
-    runPhase2,
   } = useTrip();
 
   // Use selectedPlace directly — avoids the card vanishing when tab switches
@@ -102,20 +98,6 @@ export default function TabbedPlacesWidget({ expandable = true }) {
         expandable={expandable}
         extraHeader={
           <div className="wishlist-header-controls">
-            {coords && !phase2Done && (
-              <button
-                type="button"
-                className="wishlist-header-tab"
-                onClick={runPhase2}
-                disabled={phase2Loading}
-                title="Load restaurants, nature spots, and hidden gems"
-              >
-                {phase2Loading
-                  ? <Loader2 size={16} strokeWidth={1.75} className="spin" aria-hidden />
-                  : <Sparkles size={16} strokeWidth={1.75} aria-hidden />}
-                <span>{phase2Loading ? 'Loading…' : 'Load more'}</span>
-              </button>
-            )}
             {activeWishlist && (
               <span className="wishlist-count" title="Active wishlist">
                 {shortListName(activeWishlist.name)} · {savedCount}
