@@ -7,6 +7,7 @@ import { useIsDesktop } from '../hooks/useIsDesktop';
 import { getRecentTrips } from '../utils/recentTrips';
 import SmartSearchInput from './SmartSearchInput';
 import WishlistOverlay from './WishlistOverlay';
+import ErrorBoundary from './ErrorBoundary';
 import { useClickOutside } from '../hooks/useClickOutside';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 
@@ -278,7 +279,19 @@ export default function Header() {
         )}
       </div>
 
-      {wishlistOpen && <WishlistOverlay onClose={() => setWishlistOpen(false)} />}
+      {wishlistOpen && (
+        <ErrorBoundary label="Wishlist" fallback={(err, reset) => (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)' }}>
+            <div style={{ background: 'var(--bg-elevated)', borderRadius: 12, padding: 24, maxWidth: 320, textAlign: 'center' }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Wishlist error</div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>{String(err?.message || err)}</div>
+              <button className="btn btn-ghost" onClick={() => { reset(); setWishlistOpen(false); }}>Close</button>
+            </div>
+          </div>
+        )}>
+          <WishlistOverlay onClose={() => setWishlistOpen(false)} />
+        </ErrorBoundary>
+      )}
     </header>
   );
 }

@@ -28,7 +28,54 @@ export default defineConfig({
             type: 'image/png'
           }
         ]
-      }
+      },
+      devOptions: {
+        enabled: true
+      },
+      workbox: {
+        runtimeCaching: [
+          {
+            // Geocoding: stable results, cache aggressively
+            urlPattern: /^https:\/\/maps\.googleapis\.com\/maps\/api\/geocode\//,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'geocoding-cache',
+              expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // OpenWeather 5-day forecast: stale-while-revalidate, 2hr expiry
+            urlPattern: /^https:\/\/api\.openweathermap\.org\//,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'openweather-cache',
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 2 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // Open-Meteo historical archive: immutable data, cache 7 days
+            urlPattern: /^https:\/\/archive-api\.open-meteo\.com\//,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'open-meteo-cache',
+              expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 7 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // Wikipedia REST summary + OpenSearch
+            urlPattern: /^https:\/\/en\.wikipedia\.org\//,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'wikipedia-cache',
+              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 3 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
+      },
     })
   ],
   server: {

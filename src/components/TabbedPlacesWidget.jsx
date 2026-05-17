@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Compass, Utensils, Leaf, Gem, Heart, Navigation, Phone, Globe } from 'lucide-react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { Compass, Utensils, Leaf, Gem, Heart, Navigation, Phone, Globe, Sparkles, Loader2 } from 'lucide-react';
 import Card from './Card';
 import { useTrip } from '../hooks/useTrip';
 import { directionsUrl, fetchPlaceDetails } from '../services/googleMaps';
@@ -35,7 +35,11 @@ export default function TabbedPlacesWidget({ expandable = true }) {
     deleteWishlistById,
     addPlaceToWishlist,
     removePlaceFromWishlist,
-    isWishlisted
+    isWishlisted,
+    coords,
+    phase2Loading,
+    phase2Done,
+    runPhase2,
   } = useTrip();
 
   // Use selectedPlace directly — avoids the card vanishing when tab switches
@@ -44,14 +48,38 @@ export default function TabbedPlacesWidget({ expandable = true }) {
   const isWishlistTab = activeTab === 'wishlist';
   const savedCount = activeWishlist?.items?.length || 0;
 
+  // Refs so the re-anchor effect can read current values without them being deps.
+  const selectedPlaceIdRef = useRef(selectedPlaceId);
+  const selectedPlaceRef = useRef(selectedPlace);
+  useEffect(() => {
+    selectedPlaceIdRef.current = selectedPlaceId;
+    selectedPlaceRef.current = selectedPlace;
+  }, [selectedPlaceId, selectedPlace]);
+
+  // Scroll selected item to top when selection changes.
   useEffect(() => {
     if (!selectedPlaceId) return;
     const raf = requestAnimationFrame(() => {
       const el = document.querySelector(`[data-place-id="${selectedPlaceId}"]`);
-      if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      if (el) el.scrollIntoView({ block: 'start', behavior: 'instant' });
     });
     return () => cancelAnimationFrame(raf);
   }, [selectedPlaceId]);
+
+  // Re-anchor scroll when list data changes while detail card is open.
+  // Prevents async writes (Phase 2, wiki enrichment, fetchTabIfNeeded completing)
+  // from resetting scroll to 0 and showing a different place than selected.
+  useEffect(() => {
+    const placeId = selectedPlaceIdRef.current;
+    if (!placeId || !selectedPlaceRef.current) return;
+    if (activeTabItems.length === 0) return;
+    if (!activeTabItems.some((a) => a.placeId === placeId)) return;
+    const raf = requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-place-id="${placeId}"]`);
+      if (el) el.scrollIntoView({ block: 'start', behavior: 'instant' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [activeTabItems]);
 
   // Close detail panel on click-outside, but let place-row clicks go through
   // so selecting a new place while another is open works in one tap.
@@ -74,6 +102,20 @@ export default function TabbedPlacesWidget({ expandable = true }) {
         expandable={expandable}
         extraHeader={
           <div className="wishlist-header-controls">
+            {coords && !phase2Done && (
+              <button
+                type="button"
+                className="wishlist-header-tab"
+                onClick={runPhase2}
+                disabled={phase2Loading}
+                title="Load restaurants, nature spots, and hidden gems"
+              >
+                {phase2Loading
+                  ? <Loader2 size={16} strokeWidth={1.75} className="spin" aria-hidden />
+                  : <Sparkles size={16} strokeWidth={1.75} aria-hidden />}
+                <span>{phase2Loading ? 'Loading…' : 'Load more'}</span>
+              </button>
+            )}
             {activeWishlist && (
               <span className="wishlist-count" title="Active wishlist">
                 {shortListName(activeWishlist.name)} · {savedCount}
@@ -395,7 +437,7 @@ function WishlistTab({
   );
 }
 
-function PlaceRow({
+const PlaceRow = memo(function PlaceRow({
   place: a,
   index: i,
   selected,
@@ -477,7 +519,15 @@ function PlaceRow({
       </div>
     </div>
   );
-}
+// Ignore callback prop identity changes — functions are stable in behavior.
+// Only re-render when data or selection state changes.
+}, (prev, next) =>
+  prev.place === next.place &&
+  prev.index === next.index &&
+  prev.selected === next.selected &&
+  prev.saved === next.saved &&
+  prev.activeListName === next.activeListName
+);
 
 function hostnameOf(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
@@ -675,8 +725,8 @@ function first30Words(text) {
   return { preview: words.slice(0, 30).join(' ') + '…', hasMore: true };
 }
 
-function ExpandableDescription({ text, expanded, onToggle, wikiUrl }) {
-  const { preview, hasMore } = first30Words(text);
+const ExpandableDescription = memo(function ExpandableDescription({ text, expanded, onToggle, wikiUrl }) {
+  const { preview, hasMore } = useMemo(() => first30Words(text), [text]);
   return (
     <div className="detail-description-block">
       <p className="detail-description">
@@ -694,7 +744,7 @@ function ExpandableDescription({ text, expanded, onToggle, wikiUrl }) {
       )}
     </div>
   );
-}
+});
 
 function Skeleton() {
   return (

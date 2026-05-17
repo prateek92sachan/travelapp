@@ -22,6 +22,8 @@ import { fetchWeather, fetchLastYearWeather } from '../services/weather';
 import { fetchAnnualEvents } from '../services/events';
 import { enrichWithWiki } from '../services/wikipedia';
 import { saveRecentTrip, getRecentTrips, replaceRecentTrips } from '../utils/recentTrips';
+import { getCachedPlaces, setCachedPlaces } from '../utils/placeCache';
+import { saveUIState, getUIState } from '../utils/uiState';
 import { haversineKm } from '../utils/geo';
 import {
   deleteWishlist,
@@ -87,6 +89,9 @@ export function TripProvider({ children }) {
   const [activeTab, setActiveTab] = useState('activities');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [phase2Loading, setPhase2Loading] = useState(false);
+  const [phase2Done, setPhase2Done] = useState(false);
+  const phase2LoadingRef = useRef(false);
   const [selectedPlaceId, setSelectedPlaceId] = useState(null);
   const [selectedPlace, setSelectedPlace] = useState(null);
   const [wishlist, setWishlist] = useState(() =>
@@ -158,9 +163,17 @@ export function TripProvider({ children }) {
   const destinationRef = useRef(destination);
   const dateRef = useRef(date);
   const coordsRef = useRef(null);
-  useEffect(() => { destinationRef.current = destination; }, [destination]);
-  useEffect(() => { dateRef.current = date; }, [date]);
-  useEffect(() => { coordsRef.current = coords; }, [coords]);
+  const activeTabRef = useRef(activeTab);
+  const selectedPlaceIdRef = useRef(null);
+  const weatherRef = useRef(null);
+  useEffect(() => {
+    destinationRef.current = destination;
+    dateRef.current = date;
+    coordsRef.current = coords;
+    activeTabRef.current = activeTab;
+    selectedPlaceIdRef.current = selectedPlaceId;
+    weatherRef.current = weather;
+  }, [destination, date, coords, activeTab, selectedPlaceId, weather]);
 
   // Sync state -> URL (shareable)
   useEffect(() => {
@@ -175,10 +188,9 @@ export function TripProvider({ children }) {
   // make decisions without depending on tabData (which would thrash render).
   useEffect(() => {
     tabDataRef.current = tabData;
-  }, [tabData]);
-
-  useEffect(() => { wishlistRef.current = wishlist; }, [wishlist]);
-  useEffect(() => { saveToCloudRef.current = saveToCloud; }, [saveToCloud]);
+    wishlistRef.current = wishlist;
+    saveToCloudRef.current = saveToCloud;
+  }, [tabData, wishlist, saveToCloud]);
 
   // On sign-in: load from Firestore → restore state; if no cloud data, upload local
   useEffect(() => {
@@ -274,6 +286,7 @@ export function TripProvider({ children }) {
       setActiveTab(tabKey);
       setSelectedPlaceId(null);
       setSelectedPlace(null);
+      saveUIState({ activeTab: tabKey, selectedPlaceId: null });
       // City-wide path: lazy-load the tab's data
       fetchTabIfNeeded(tabKey);
 
@@ -324,6 +337,7 @@ export function TripProvider({ children }) {
 
   const search = useCallback(
     async (overrides = {}) => {
+      const { silentRefresh = false } = overrides;
       const dest = overrides.destination ?? destinationRef.current;
       const dt = overrides.date ?? dateRef.current;
 
@@ -340,9 +354,7 @@ export function TripProvider({ children }) {
       }
 
       const myReq = ++requestSeq.current;
-      setLoading(true);
       setError(null);
-      setSelectedPlaceId(null);
 
       // Bump every per-tab seq so any in-flight fetch from the previous
       // destination resolves stale and is ignored. (Critical: a user-clicked
@@ -352,25 +364,32 @@ export function TripProvider({ children }) {
         tabRequestSeq.current[k] = (tabRequestSeq.current[k] || 0) + 1;
       });
 
-      // Reset all tab data on new search — old destination's data is invalid
-      const cleared = { activities: null, restaurants: null, nature: null, gems: null };
-      writeTabData(cleared);
-      setActiveTab('activities');
-      setLastYearWeather(null);
-      setEvents([]);
-      // Hotels are city-specific — wipe and re-fetch on next toggle
-      setHotels([]);
-      setSelectedHotelId(null);
-      hotelsLoadedForRef.current = null;
+      if (!silentRefresh) {
+        // Reset all tab data on new search — old destination's data is invalid
+        const cleared = { activities: null, restaurants: null, nature: null, gems: null };
+        writeTabData(cleared);
+        setLoading(true);
+        setSelectedPlaceId(null);
+        setActiveTab('activities');
+        saveUIState({ activeTab: 'activities', selectedPlaceId: null });
+        setPhase2Done(false);
+        phase2LoadingRef.current = false;
+        setLastYearWeather(null);
+        setEvents([]);
+        // Hotels are city-specific — wipe and re-fetch on next toggle
+        setHotels([]);
+        setSelectedHotelId(null);
+        hotelsLoadedForRef.current = null;
 
-      // Exit nearby-mode and clear viewport overrides on new search
-      setNearbyAnchor(null);
-      setNearbyItems({ activities: null, restaurants: null, nature: null, gems: null });
-      nearbyRequestSeq.current++;
-      setViewportItems(null);
-      viewportRequestSeq.current++;
-      // Wipe the API-level viewport cache too — old city's data is irrelevant
-      clearViewportCache();
+        // Exit nearby-mode and clear viewport overrides on new search
+        setNearbyAnchor(null);
+        setNearbyItems({ activities: null, restaurants: null, nature: null, gems: null });
+        nearbyRequestSeq.current++;
+        setViewportItems(null);
+        viewportRequestSeq.current++;
+        // Wipe the API-level viewport cache too — old city's data is irrelevant
+        clearViewportCache();
+      }
 
       try {
         const geo = await geocodeDestination(dest);
@@ -405,68 +424,171 @@ export function TripProvider({ children }) {
         setWeather(w);
         writeTabData((prev) => ({ ...prev, activities: acts }));
 
-        saveRecentTrip({ destination: dest, date: dt, formattedAddress: geo.formattedAddress });
-        if (saveToCloudRef.current) {
-          saveToCloudRef.current({ wishlist: getWishlist(), recentTrips: getRecentTrips() });
+        if (!silentRefresh) {
+          saveRecentTrip({ destination: dest, date: dt, formattedAddress: geo.formattedAddress });
+          if (saveToCloudRef.current) {
+            saveToCloudRef.current({ wishlist: getWishlist(), recentTrips: getRecentTrips() });
+          }
         }
 
-        // Phase 2 (background, non-blocking): last-year weather + annual events
-        // + wiki for activities + remaining 3 categories for multi-layer map.
-        // Each is independently caught so one failure doesn't sink the others.
-        const r = searchRadiusRef.current;
-        Promise.allSettled([
-          fetchLastYearWeather({ lat: geo.lat, lng: geo.lng, dateISO: dt }),
-          fetchAnnualEvents(dest, dt),
-          enrichWithWiki(acts, dest),
-          fetchTopRestaurants({ destination: dest, lat: geo.lat, lng: geo.lng, radiusMeters: r }),
-          fetchTopNatureUnique({ destination: dest, lat: geo.lat, lng: geo.lng, radiusMeters: r }),
-          fetchHiddenGems({ destination: dest, lat: geo.lat, lng: geo.lng, radiusMeters: r })
-        ])
-          .then(([lywRes, evRes, enrichedRes, restsRes, natRes, gemsRes]) => {
-            if (myReq !== requestSeq.current) return;
-            if (lywRes.status === 'fulfilled' && lywRes.value) {
-              setLastYearWeather(lywRes.value);
-            }
-            if (evRes.status === 'fulfilled' && evRes.value?.length) {
-              setEvents(evRes.value);
-            }
-            if (enrichedRes.status === 'fulfilled' && enrichedRes.value) {
-              writeTabData((prev) => ({ ...prev, activities: enrichedRes.value }));
-            }
-            const extra = {};
-            if (restsRes.status === 'fulfilled' && restsRes.value) extra.restaurants = restsRes.value;
-            if (natRes.status === 'fulfilled' && natRes.value) extra.nature = natRes.value;
-            if (gemsRes.status === 'fulfilled' && gemsRes.value) extra.gems = gemsRes.value;
-            if (Object.keys(extra).length) writeTabData((prev) => ({ ...prev, ...extra }));
-          })
-          .catch((err) => console.warn('Phase 2 enrichment error:', err));
+        // Persist Phase 1 result so next restore shows activities + weather instantly.
+        // Phase 2 (restaurants, nature, gems, wiki, history) is user-triggered via
+        // the button in the places card header and will overwrite this with full data.
+        setCachedPlaces(dest, dt, {
+          coords: geo,
+          tabData: { activities: acts, restaurants: null, nature: null, gems: null },
+          weather: w,
+        });
       } catch (e) {
         if (myReq !== requestSeq.current) return;
         console.error(e);
         setError(e.message || 'Something went wrong fetching trip data.');
       } finally {
-        if (myReq === requestSeq.current) setLoading(false);
+        if (!silentRefresh && myReq === requestSeq.current) setLoading(false);
       }
     },
     [] // reads destination/date via refs; stable across all renders
   );
 
-  // Auto-search on mount if URL had params
+  // Manually triggered Phase 2: last-year weather, events, wiki enrichment for
+  // activities, and the three remaining place categories (restaurants, nature, gems).
+  // Uses seq coordination so it never races with fetchTabIfNeeded for the same tab.
+  const runPhase2 = useCallback(() => {
+    if (phase2LoadingRef.current) return;
+    const geo = coordsRef.current;
+    const dest = destinationRef.current;
+    const dt = dateRef.current;
+    if (!geo || !dest) return;
+
+    const r = searchRadiusRef.current;
+    const acts = tabDataRef.current.activities || [];
+    const myReq = requestSeq.current;
+
+    const p2RestsSeq = tabRequestSeq.current.restaurants || 0;
+    const p2NatSeq   = tabRequestSeq.current.nature      || 0;
+    const p2GemsSeq  = tabRequestSeq.current.gems        || 0;
+
+    phase2LoadingRef.current = true;
+    setPhase2Loading(true);
+
+    Promise.allSettled([
+      fetchLastYearWeather({ lat: geo.lat, lng: geo.lng, dateISO: dt }),
+      fetchAnnualEvents(dest, dt),
+      enrichWithWiki(acts, dest),
+      fetchTopRestaurants({ destination: dest, lat: geo.lat, lng: geo.lng, radiusMeters: r }),
+      fetchTopNatureUnique({ destination: dest, lat: geo.lat, lng: geo.lng, radiusMeters: r }),
+      fetchHiddenGems({ destination: dest, lat: geo.lat, lng: geo.lng, radiusMeters: r })
+    ])
+      .then(([lywRes, evRes, enrichedRes, restsRes, natRes, gemsRes]) => {
+        if (myReq !== requestSeq.current) return;
+        if (lywRes.status === 'fulfilled' && lywRes.value) setLastYearWeather(lywRes.value);
+        if (evRes.status === 'fulfilled' && evRes.value?.length) setEvents(evRes.value);
+        const finalActs = enrichedRes.status === 'fulfilled' && enrichedRes.value
+          ? enrichedRes.value : acts;
+        if (enrichedRes.status === 'fulfilled' && enrichedRes.value) {
+          writeTabData((prev) => ({ ...prev, activities: finalActs }));
+        }
+        const extra = {};
+        if (restsRes.status === 'fulfilled' && restsRes.value
+            && (tabRequestSeq.current.restaurants || 0) === p2RestsSeq)
+          extra.restaurants = restsRes.value;
+        if (natRes.status === 'fulfilled' && natRes.value
+            && (tabRequestSeq.current.nature || 0) === p2NatSeq)
+          extra.nature = natRes.value;
+        if (gemsRes.status === 'fulfilled' && gemsRes.value
+            && (tabRequestSeq.current.gems || 0) === p2GemsSeq)
+          extra.gems = gemsRes.value;
+        if (Object.keys(extra).length) writeTabData((prev) => ({ ...prev, ...extra }));
+
+        const currentTabData = tabDataRef.current;
+        setCachedPlaces(dest, dt, {
+          coords: geo,
+          tabData: {
+            activities: finalActs || currentTabData.activities,
+            restaurants: extra.restaurants ?? currentTabData.restaurants ?? null,
+            nature: extra.nature ?? currentTabData.nature ?? null,
+            gems: extra.gems ?? currentTabData.gems ?? null,
+          },
+          weather: weatherRef.current,
+        });
+      })
+      .catch((err) => console.warn('Phase 2 error:', err))
+      .finally(() => {
+        phase2LoadingRef.current = false;
+        setPhase2Loading(false);
+        if (myReq === requestSeq.current) setPhase2Done(true);
+      });
+  }, [writeTabData]);
+
+  // Auto-search on mount if URL had params.
+  // If a fresh cache hit exists, pre-populate state immediately so the UI
+  // renders instantly, then re-fetch silently in the background.
+  // Also restores the active tab and selected place the user was on.
   useEffect(() => {
-    if (initialRef.current.destination) search();
+    if (!initialRef.current.destination) return;
+    const cached = getCachedPlaces(initialRef.current.destination, initialRef.current.date);
+    if (cached) {
+      setCoords(cached.coords);
+      writeTabData(cached.tabData);
+      if (cached.weather) setWeather(cached.weather);
+
+      const ui = getUIState();
+      if (ui?.activeTab) setActiveTab(ui.activeTab);
+
+      if (ui?.selectedPlaceId && cached.tabData) {
+        const tabKey = ui.activeTab || 'activities';
+        const place = (cached.tabData[tabKey] || []).find(
+          (p) => p.placeId === ui.selectedPlaceId
+        );
+        if (place) {
+          setSelectedPlaceId(ui.selectedPlaceId);
+          setSelectedPlace(place);
+          // Re-open mobile drawer after React renders the restored state
+          requestAnimationFrame(() => {
+            window.dispatchEvent(new CustomEvent('travelapp:openPlaces'));
+          });
+        }
+      }
+    }
+    search({ silentRefresh: !!cached });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ---- Selection (cross-tab) ---------------------------------------------
 
   const selectPlace = useCallback((place, category) => {
+    if (!place) {
+      // Close detail but keep selectedPlaceId — preserves list highlight for
+      // context after the user dismisses the detail card.
+      setSelectedPlace(null);
+      setSelectedHotelId(null);
+      return;
+    }
     // Switch tab first (before setting selectedPlaceId) so React batches both
     // state updates in one render — detail card finds place in the correct tab.
-    if (place && category) switchTabRef.current?.(category);
-    setSelectedPlaceId(place?.placeId ?? null);
-    setSelectedPlace(place ?? null);
+    if (category) {
+      // Exit viewport mode without panning the map — detail is opening and
+      // the background list should show city-wide results, not re-fetch
+      // viewport data for the new category (which would visibly refresh the list).
+      if (viewportItemsRef.current !== null) {
+        viewportRequestSeq.current++;
+        viewportItemsRef.current = null;
+        setViewportItems(null);
+        setViewportLoading(false);
+      }
+      switchTabRef.current(category);
+    }
+    setSelectedPlaceId(place.placeId);
+    setSelectedPlace(place);
     setSelectedHotelId(null);
-    if (place) {
+    saveUIState({
+      activeTab: category || activeTabRef.current,
+      selectedPlaceId: place.placeId,
+    });
+    // Only pan map when selection came from a map marker (category known).
+    // List-row selections must not move the map — user would return to map
+    // displaced from city context ("unknown section" bug).
+    if (category) {
       window.dispatchEvent(
         new CustomEvent('travelapp:focusLocation', {
           detail: {
@@ -477,8 +599,8 @@ export function TripProvider({ children }) {
           }
         })
       );
-      window.dispatchEvent(new CustomEvent('travelapp:openPlaces'));
     }
+    window.dispatchEvent(new CustomEvent('travelapp:openPlaces'));
   }, []);
 
   const wishlistLists = useMemo(() => wishlist.lists || [], [wishlist]);
@@ -673,6 +795,12 @@ export function TripProvider({ children }) {
     viewportItemsRef.current = null;
     setViewportItems(null);
     setViewportLoading(false);
+    const c = coordsRef.current;
+    if (c) {
+      window.dispatchEvent(
+        new CustomEvent('travelapp:panToCity', { detail: { lat: c.lat, lng: c.lng } })
+      );
+    }
   }, []);
 
   // Derive: items for the currently-active tab. Map widget reads from this.
@@ -694,12 +822,15 @@ export function TripProvider({ children }) {
   }, [nearbyAnchor, nearbyItems, viewportItems, tabData, activeTab]);
 
   // Loading state should reflect whichever data source is currently active.
-  const activeTabLoading =
-    TAB_KEYS.includes(activeTab) &&
-    ((nearbyAnchor && nearbyLoading) ||
-      viewportLoading ||
-      tabLoading[activeTab] ||
-      false);
+  const activeTabLoading = useMemo(
+    () =>
+      TAB_KEYS.includes(activeTab) &&
+      ((nearbyAnchor && nearbyLoading) ||
+        viewportLoading ||
+        tabLoading[activeTab] ||
+        false),
+    [activeTab, nearbyAnchor, nearbyLoading, viewportLoading, tabLoading]
+  );
 
   const value = useMemo(
     () => ({
@@ -749,7 +880,10 @@ export function TripProvider({ children }) {
       viewportItems,
       viewportLoading,
       refreshViewport,
-      clearViewportItems
+      clearViewportItems,
+      phase2Loading,
+      phase2Done,
+      runPhase2,
     }),
     [
       destination,
@@ -794,7 +928,10 @@ export function TripProvider({ children }) {
       viewportItems,
       viewportLoading,
       refreshViewport,
-      clearViewportItems
+      clearViewportItems,
+      phase2Loading,
+      phase2Done,
+      runPhase2,
     ]
   );
 

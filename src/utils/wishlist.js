@@ -25,7 +25,8 @@ function normalize(raw) {
     return {
       version: 2,
       activeListId: raw.activeListId || raw.lists[0]?.id || null,
-      lists: raw.lists
+      // Guarantee every list has an items array (guards against corrupted data)
+      lists: raw.lists.map((l) => ({ ...l, items: Array.isArray(l.items) ? l.items : [] }))
     };
   }
 
@@ -88,7 +89,7 @@ export function ensureWishlistForDestination({ name, destination }) {
   // Drop empty lists from previous destinations before switching.
   const pruned = wishlist.lists.filter(
     (l) =>
-      l.items.length > 0 ||
+      (l.items?.length ?? 0) > 0 ||
       l.destination?.toLowerCase() === trimmedDestination.toLowerCase()
   );
 

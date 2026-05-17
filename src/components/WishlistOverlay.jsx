@@ -1,4 +1,4 @@
-import { createPortal } from 'react-dom';
+import { createPortal, useMemo } from 'react';
 import { useTrip } from '../hooks/useTrip';
 import { useAuth } from '../hooks/useAuth';
 import { SavedPlaceCard } from './WishlistPanel';
@@ -13,7 +13,10 @@ export default function WishlistOverlay({ onClose }) {
   } = useTrip();
   const { user } = useAuth();
 
-  const totalItems = wishlistLists.reduce((sum, l) => sum + l.items.length, 0);
+  const totalItems = useMemo(
+    () => wishlistLists.reduce((sum, l) => sum + (l.items?.length ?? 0), 0),
+    [wishlistLists]
+  );
 
   return createPortal(
     <div className="wishlist-overlay" role="dialog" aria-label="My Wishlist" aria-modal="true">

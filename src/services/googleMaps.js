@@ -68,31 +68,37 @@ const PLACES_FIELD_MASK = [
  * the raw places array (filtered/ranked downstream).
  */
 async function placesTextSearch({ textQuery, lat, lng, radiusMeters, fetchCount }) {
-  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Goog-Api-Key': GOOGLE_MAPS_KEY,
-      'X-Goog-FieldMask': PLACES_FIELD_MASK
-    },
-    body: JSON.stringify({
-      textQuery,
-      maxResultCount: fetchCount,
-      locationBias: {
-        circle: {
-          center: { latitude: lat, longitude: lng },
-          radius: radiusMeters
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': GOOGLE_MAPS_KEY,
+        'X-Goog-FieldMask': PLACES_FIELD_MASK
+      },
+      body: JSON.stringify({
+        textQuery,
+        maxResultCount: fetchCount,
+        locationBias: {
+          circle: {
+            center: { latitude: lat, longitude: lng },
+            radius: radiusMeters
+          }
         }
-      }
-    })
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Places API error ${res.status}: ${errText}`);
+      })
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Places API error ${res.status}: ${errText}`);
+    }
+    const data = await res.json();
+    return data.places || [];
+  } finally {
+    clearTimeout(timer);
   }
-  const data = await res.json();
-  return data.places || [];
 }
 
 // ---- Ranking helpers ------------------------------------------------------
@@ -547,6 +553,10 @@ export async function fetchPlacesInViewport({
             .map(shapePlace);
 
       VIEWPORT_CACHE.set(key, { data, time: Date.now() });
+      // LRU eviction: keep cache bounded at 100 entries
+      if (VIEWPORT_CACHE.size > 100) {
+        VIEWPORT_CACHE.delete(VIEWPORT_CACHE.keys().next().value);
+      }
       return data;
     } finally {
       inFlight.delete(key);

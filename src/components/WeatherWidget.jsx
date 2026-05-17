@@ -6,7 +6,7 @@ export default function WeatherWidget() {
   const { weather, lastYearWeather, events, loading } = useTrip();
 
   return (
-    <Card icon="🌤" title="Weather">
+    <Card icon="🌤" title="Weather" expandable={false}>
       {loading && !weather ? (
         <Skeleton />
       ) : !weather ? (

@@ -168,15 +168,23 @@ async function fetchHistoricalAverage({ lat, lng, dateISO, kind }) {
         `precipitation_sum,wind_speed_10m_max` +
         `&hourly=relative_humidity_2m` +
         `&timezone=UTC`;
-      const r = await fetch(url);
-      if (!r.ok) return null;
-      const j = await r.json();
-      // Compute daily mean humidity from hourly values
-      const hums = j.hourly?.relative_humidity_2m?.filter(Number.isFinite) || [];
-      const meanHum = hums.length
-        ? hums.reduce((a, b) => a + b, 0) / hums.length
-        : null;
-      return { ...j.daily, _humidity: meanHum };
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10000);
+      try {
+        const r = await fetch(url, { signal: controller.signal });
+        if (!r.ok) return null;
+        const j = await r.json();
+        // Compute daily mean humidity from hourly values
+        const hums = j.hourly?.relative_humidity_2m?.filter(Number.isFinite) || [];
+        const meanHum = hums.length
+          ? hums.reduce((a, b) => a + b, 0) / hums.length
+          : null;
+        return { ...j.daily, _humidity: meanHum };
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
     })
   );
 

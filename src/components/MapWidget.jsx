@@ -303,6 +303,19 @@ function CenterSync({ lat, lng, skip }) {
     map.panTo({ lat, lng });
     map.setZoom(12);
   }, [map, lat, lng, skip]);
+
+  useEffect(() => {
+    if (!map) return;
+    function onReset(e) {
+      const { lat: rlat, lng: rlng } = e.detail || {};
+      if (typeof rlat !== 'number') return;
+      map.panTo({ lat: rlat, lng: rlng });
+      map.setZoom(12);
+    }
+    window.addEventListener('travelapp:panToCity', onReset);
+    return () => window.removeEventListener('travelapp:panToCity', onReset);
+  }, [map]);
+
   return null;
 }
 
@@ -314,7 +327,7 @@ function FocusListener() {
       const { lat, lng } = e.detail || {};
       if (typeof lat !== 'number' || typeof lng !== 'number') return;
       map.panTo({ lat, lng });
-      map.setZoom(15);
+      // No zoom change — keep user's current zoom so surrounding markers stay visible
     };
     window.addEventListener('travelapp:focusLocation', onFocus);
     return () => window.removeEventListener('travelapp:focusLocation', onFocus);

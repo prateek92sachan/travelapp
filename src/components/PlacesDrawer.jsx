@@ -48,10 +48,32 @@ export default function PlacesDrawer() {
   useEffect(() => {
     if (!mobileExpanded) return;
     history.pushState({ placesOverlay: true }, '');
-    function onPop() { setMobileExpanded(false); }
+
+    // iOS PWA fires a spurious popstate on app resume from background.
+    // Track visibility changes so we can ignore those ghost events.
+    let resumingFromBackground = false;
+    let clearResumeTimer = null;
+
+    function onVisibilityChange() {
+      if (document.hidden) {
+        resumingFromBackground = true;
+        clearTimeout(clearResumeTimer);
+      } else {
+        clearResumeTimer = setTimeout(() => { resumingFromBackground = false; }, 400);
+      }
+    }
+
+    function onPop() {
+      if (resumingFromBackground) return;
+      setMobileExpanded(false);
+    }
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('popstate', onPop);
     return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('popstate', onPop);
+      clearTimeout(clearResumeTimer);
       // If overlay closes programmatically (not via back), clean up the
       // extra history entry so the back button still works normally.
       if (history.state?.placesOverlay) history.back();

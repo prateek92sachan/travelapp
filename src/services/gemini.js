@@ -1,24 +1,28 @@
 import { GEMINI_KEY } from './config';
 
 const GEMINI_ENDPOINT =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent';
 
 const DESC_CACHE = new Map();
+const DESC_TTL_MS = 30 * 60 * 1000; // 30 min
 
-/**
- * Generate a 200-250 word description for a place using Gemini.
- * Returns the text string or null (no key, API error, etc.).
- * Cached per placeId for the session.
- */
 export async function fetchPlaceDescription(place) {
-  if (!GEMINI_KEY) {
-    console.warn('[Gemini] VITE_GEMINI_KEY not set — skipping description');
-    return null;
+  if (!GEMINI_KEY) return null;
+
+  const { placeId, name, types } = place;
+
+  // Evict stale entries; cap at 100 to bound memory
+  const now = Date.now();
+  if (DESC_CACHE.size >= 100) {
+    for (const [k, v] of DESC_CACHE) {
+      if (now - v.ts > DESC_TTL_MS) DESC_CACHE.delete(k);
+      if (DESC_CACHE.size < 100) break;
+    }
+    if (DESC_CACHE.size >= 100) DESC_CACHE.delete(DESC_CACHE.keys().next().value);
   }
 
-  const { placeId, name, address, types, rating, reviewCount } = place;
-  if (DESC_CACHE.size > 150) DESC_CACHE.clear();
-  if (DESC_CACHE.has(placeId)) return DESC_CACHE.get(placeId);
+  const cached = DESC_CACHE.get(placeId);
+  if (cached && now - cached.ts < DESC_TTL_MS) return cached.text;
 
   const typeStr = (types || [])
     .filter((t) => !['point_of_interest', 'establishment'].includes(t))
@@ -26,12 +30,10 @@ export async function fetchPlaceDescription(place) {
     .map((t) => t.replace(/_/g, ' '))
     .join(', ');
 
-  const ratingPart = rating ? `, rated ${rating}/5 with ${reviewCount || 0} reviews` : '';
   const typePart = typeStr ? ` (${typeStr})` : '';
-  const addrPart = address ? ` located at ${address}` : '';
 
   const prompt =
-    `Write a 100-150 word description of ${name}${addrPart}${typePart}${ratingPart}. ` +
+    `Write a 100-150 word description of ${name}${typePart}. ` +
     `What makes it special and what to expect. Travel guide tone, flowing prose, no headers or bullets.`;
 
   try {
@@ -45,9 +47,10 @@ export async function fetchPlaceDescription(place) {
       console.error('[Gemini] API error', res.status, errBody);
       return null;
     }
-    const data = await res.json();
+    let data;
+    try { data = await res.json(); } catch { return null; }
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
-    if (text) DESC_CACHE.set(placeId, text);
+    if (text) DESC_CACHE.set(placeId, { text, ts: Date.now() });
     return text;
   } catch (err) {
     console.error('[Gemini] fetch failed', err);

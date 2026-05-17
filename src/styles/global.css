@@ -60,6 +60,45 @@ body {
 button { font-family: inherit; cursor: pointer; }
 input { font-family: inherit; }
 
+/* ---------- Global scrollbar — pill capsule style ---------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.18) transparent;
+}
+[data-theme='dark'] * {
+  scrollbar-color: rgba(255,255,255,0.18) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track {
+  background: rgba(0,0,0,0.04);
+  border-radius: 99px;
+  border: 1px solid rgba(0,0,0,0.07);
+  margin: 3px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.2);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(0,0,0,0.32);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-button { display: none; }
+[data-theme='dark'] *::-webkit-scrollbar-track {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.07);
+}
+[data-theme='dark'] *::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.22);
+  background-clip: padding-box;
+}
+[data-theme='dark'] *::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.34);
+  background-clip: padding-box;
+}
+
 /* ---------- App layout ---------- */
 .app-shell {
   min-height: 100vh;
@@ -582,12 +621,10 @@ input { font-family: inherit; }
   font-size: 15px;
   font-weight: 800;
 }
-.wishlist-menu-subtitle,
+.wishlist-menu-subtitle { color: var(--text-muted); font-size: 12px; }
 .wishlist-empty {
   color: var(--text-muted);
   font-size: 12px;
-}
-.wishlist-empty {
   padding: 16px 8px;
   line-height: 1.45;
   text-align: center;
@@ -1326,7 +1363,8 @@ input { font-family: inherit; }
 .activity-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 20px;
+  padding: 0 4px;
 }
 .activity-item {
   display: flex;
@@ -1341,12 +1379,12 @@ input { font-family: inherit; }
   width: 100%;
   color: var(--text);
   align-items: stretch;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
 }
 .activity-item:hover {
   border-color: var(--border-strong);
   transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.30);
 }
 .activity-item.selected {
   border-color: var(--accent);
@@ -1876,7 +1914,7 @@ input { font-family: inherit; }
   bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
-  width: min(540px, calc(100vw - 32px));
+  width: min(594px, calc(100vw - 16px));
   max-height: 62vh;
   overflow-y: auto;
   background: var(--bg-elevated);
@@ -1887,6 +1925,11 @@ input { font-family: inherit; }
   z-index: 80;
   animation: slide-up 220ms ease-out;
 }
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spin { animation: spin 0.8s linear infinite; }
+
 @keyframes slide-up {
   from { opacity: 0; transform: translate(-50%, 10px); }
   to { opacity: 1; transform: translate(-50%, 0); }
@@ -2043,14 +2086,13 @@ input { font-family: inherit; }
 
 /* ---------- Spinner / loading ---------- */
 .skeleton {
-  background: linear-gradient(90deg, var(--bg-input) 25%, var(--border) 50%, var(--bg-input) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.6s infinite;
+  background: var(--bg-input);
+  animation: shimmer 1.4s ease-in-out infinite;
   border-radius: var(--radius-sm);
 }
 @keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 .skeleton-line { height: 14px; margin: 6px 0; }
 .skeleton-block { height: 80px; }
@@ -2310,7 +2352,7 @@ input { font-family: inherit; }
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--text-inverted);
+  color: var(--text);
   font-weight: 500;
   padding: 0;
   background: transparent;
@@ -2419,10 +2461,6 @@ input { font-family: inherit; }
   from { opacity: 0; transform: translate(-50%, -8px); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
 /* ---------- Stack on smaller desktops / tablets ---------- */
 @media (max-width: 1200px) {
   .places-drawer { width: 360px; }
@@ -2455,6 +2493,7 @@ input { font-family: inherit; }
     overflow: hidden;
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.14);
     background: var(--bg-elevated);
+    will-change: transform;
   }
 
   .mobile-bar-divider {
@@ -2558,7 +2597,7 @@ input { font-family: inherit; }
     bottom: 0;
     background: var(--bg-elevated);
     border-radius: var(--radius) var(--radius) 0 0;
-    overflow: hidden;
+    overflow: clip;
     display: flex;
     flex-direction: column;
     animation: slide-up-panel 260ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -2566,7 +2605,7 @@ input { font-family: inherit; }
   .places-mobile-overlay-panel .card {
     border: none;
     box-shadow: none;
-    border-radius: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
     height: 100%;
     display: flex;
     flex-direction: column;
