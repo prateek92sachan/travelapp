@@ -7,9 +7,6 @@ export default function MapControlsPanel({ open: openProp, onToggle: onTogglePro
     setMapType,
     transitOn,
     setTransitOn,
-    hotelsOn,
-    toggleHotels,
-    hotelsLoading
   } = useTrip();
 
   const [localOpen, setLocalOpen] = useState(false);
@@ -63,19 +60,7 @@ export default function MapControlsPanel({ open: openProp, onToggle: onTogglePro
               checked={transitOn}
               onChange={() => setTransitOn((v) => !v)}
             />
-            <ToggleRow
-              label={hotelsLoading ? '🛏 Hotels (loading…)' : '🛏 Hotels'}
-              checked={hotelsOn}
-              onChange={toggleHotels}
-              disabled={hotelsLoading}
-            />
           </div>
-
-          {hotelsOn && (
-            <div className="map-controls-hint muted">
-              Tap a hotel marker to see attractions within 2 km.
-            </div>
-          )}
         </div>
       )}
     </div>

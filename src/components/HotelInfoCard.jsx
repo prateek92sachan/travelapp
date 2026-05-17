@@ -13,15 +13,14 @@ const PROXIMITY_KM = 2;
  */
 export default function HotelInfoCard() {
   const {
-    hotels,
+    tabData,
     selectedHotelId,
     selectHotel,
-    tabData
   } = useTrip();
 
   const hotel = useMemo(
-    () => hotels.find((h) => h.placeId === selectedHotelId),
-    [hotels, selectedHotelId]
+    () => (tabData.hotels || []).find((h) => h.placeId === selectedHotelId),
+    [tabData.hotels, selectedHotelId]
   );
 
   // Proximity counts pull from whatever tab data is currently loaded.

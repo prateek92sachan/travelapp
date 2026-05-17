@@ -1,17 +1,18 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Compass, Utensils, Leaf, Gem, Heart, Map } from 'lucide-react';
+import { Compass, Utensils, Leaf, Gem, BedDouble, Heart, Map } from 'lucide-react';
 import TabbedPlacesWidget from './TabbedPlacesWidget';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { useTrip } from '../hooks/useTrip';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 
 const MOBILE_TABS = [
-  { key: 'activities',  Icon: Compass,  label: 'Activities',  color: '#f97316' },
-  { key: 'restaurants', Icon: Utensils, label: 'Restaurants', color: '#ef4444' },
-  { key: 'nature',      Icon: Leaf,     label: 'Nature',      color: '#22c55e' },
-  { key: 'gems',        Icon: Gem,      label: 'Hidden gems', color: '#6366f1' },
-  { key: 'wishlist',    Icon: Heart,    label: 'Wishlist',    color: '#ff385c', dividerBefore: true },
+  { key: 'activities',  Icon: Compass,   label: 'Activities',  color: '#f97316' },
+  { key: 'restaurants', Icon: Utensils,  label: 'Restaurants', color: '#ef4444' },
+  { key: 'nature',      Icon: Leaf,      label: 'Nature',      color: '#22c55e' },
+  { key: 'gems',        Icon: Gem,       label: 'Hidden gems', color: '#6366f1' },
+  { key: 'hotels',      Icon: BedDouble, label: 'Hotels',      color: '#0ea5e9' },
+  { key: 'wishlist',    Icon: Heart,     label: 'Wishlist',    color: '#ff385c', dividerBefore: true },
 ];
 
 export default function PlacesDrawer() {
@@ -20,6 +21,14 @@ export default function PlacesDrawer() {
   const [desktopExpanded, setDesktopExpanded] = useState(false);
   const drawerRef = useRef(null);
   const [mobileExpanded, setMobileExpanded] = useState(false);
+  const mobileTabsRef = useRef(null);
+
+  useEffect(() => {
+    const nav = mobileTabsRef.current;
+    if (!nav) return;
+    const btn = nav.querySelector(`[data-tab="${activeTab}"]`);
+    if (btn) btn.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+  }, [activeTab]);
 
   // Close desktop drawer on outside click
   useEffect(() => {
@@ -83,7 +92,7 @@ export default function PlacesDrawer() {
   if (!isDesktop) {
     return (
       <div className="places-mobile-card">
-        <div className="mobile-places-tabs" role="toolbar" aria-label="Place categories">
+        <div className="mobile-places-tabs" role="toolbar" aria-label="Place categories" ref={mobileTabsRef}>
           {MOBILE_TABS.map((t) => (
             <div key={t.key} className="mobile-tab-slot">
               {t.dividerBefore && (
@@ -91,6 +100,7 @@ export default function PlacesDrawer() {
               )}
               <button
                 type="button"
+                data-tab={t.key}
                 className={`mobile-tab-btn ${activeTab === t.key ? 'active' : ''}`}
                 aria-label={t.label}
                 title={t.label}

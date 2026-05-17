@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Compass, Utensils, Leaf, Gem, Settings } from 'lucide-react';
+import { Compass, Utensils, Leaf, Gem, BedDouble, Settings } from 'lucide-react';
 import { Map, AdvancedMarker, useMap } from '@vis.gl/react-google-maps';
 import { GOOGLE_MAPS_MAP_ID } from '../services/config';
 import Card from './Card';
@@ -15,21 +15,23 @@ const VIEWPORT_MIN_MOVE_KM = 0.5;
 
 // Category metadata — colors match the tab icons in PlacesDrawer / TabbedPlacesWidget
 const CATEGORY_CONFIG = {
-  activities:  { color: '#f97316', label: 'Activities',  Icon: Compass  },
-  restaurants: { color: '#ef4444', label: 'Restaurants', Icon: Utensils },
-  nature:      { color: '#22c55e', label: 'Nature',      Icon: Leaf     },
-  gems:        { color: '#6366f1', label: 'Hidden gems', Icon: Gem      },
+  activities:  { color: '#f97316', label: 'Activities',  Icon: Compass   },
+  restaurants: { color: '#ef4444', label: 'Restaurants', Icon: Utensils  },
+  nature:      { color: '#22c55e', label: 'Nature',      Icon: Leaf      },
+  gems:        { color: '#6366f1', label: 'Hidden gems', Icon: Gem       },
+  hotels:      { color: '#0ea5e9', label: 'Hotels',      Icon: BedDouble },
 };
 const CATEGORY_KEYS = Object.keys(CATEGORY_CONFIG);
 
 export default function MapWidget() {
-  const { coords, hotels, hotelsOn, loading, mapType } = useTrip();
+  const { coords, loading, mapType } = useTrip();
 
   const [visibleCategories, setVisibleCategories] = useState({
     activities: true,
     restaurants: true,
     nature: true,
-    gems: true
+    gems: true,
+    hotels: true
   });
   const [controlsOpen, setControlsOpen] = useState(false);
 
@@ -58,7 +60,6 @@ export default function MapWidget() {
         <MapInner
           key={`${coords.lat.toFixed(4)}-${coords.lng.toFixed(4)}`}
           center={coords}
-          hotels={hotelsOn ? hotels : []}
           mapType={mapType}
           visibleCategories={visibleCategories}
           toggleCategory={toggleCategory}
@@ -70,7 +71,7 @@ export default function MapWidget() {
   );
 }
 
-function MapInner({ center, hotels, mapType, visibleCategories, toggleCategory, controlsOpen, onToggleControls }) {
+function MapInner({ center, mapType, visibleCategories, toggleCategory, controlsOpen, onToggleControls }) {
   const { theme } = useTheme();
   const {
     tabData,
@@ -79,23 +80,48 @@ function MapInner({ center, hotels, mapType, visibleCategories, toggleCategory, 
     selectedPlaceId,
     selectedHotelId,
     selectPlace,
-    selectHotel
+    searchHere,
+    viewportLoading,
+    viewportItems,
+    clearViewportItems,
   } = useTrip();
+
+  // Always-valid params: initialized to city center, updated on every map idle
+  const [searchHereParams, setSearchHereParams] = useState(
+    () => ({ lat: center.lat, lng: center.lng, radiusMeters: 20000 })
+  );
+  const onUpdateSearchHere = useCallback((params) => setSearchHereParams(params), []);
+
+  const handleSearchHereClick = useCallback(() => {
+    searchHere(searchHereParams);
+  }, [searchHere, searchHereParams]);
+
+  // Buttons disabled only while a viewport fetch is in-flight or nearby mode is active
+  const actionsDisabled = viewportLoading || !!nearbyAnchor;
 
   const anchorHotel = useMemo(() => {
     if (nearbyAnchor) return nearbyAnchor;
-    return hotels.find((h) => h.placeId === selectedHotelId) || null;
-  }, [nearbyAnchor, hotels, selectedHotelId]);
+    return tabData.hotels?.find((h) => h.placeId === selectedHotelId) || null;
+  }, [nearbyAnchor, tabData.hotels, selectedHotelId]);
 
-  // Source for each category: nearby-mode overrides city-wide data
+  // Source priority: nearby > viewport (all 4 cats) > city-wide tabData
   const markersForCat = useCallback(
-    (cat) => (nearbyAnchor ? nearbyItems[cat] : tabData[cat]) || [],
-    [nearbyAnchor, nearbyItems, tabData]
+    (cat) => {
+      if (nearbyAnchor) return nearbyItems[cat] || [];
+      if (viewportItems) return viewportItems[cat] || [];
+      return tabData[cat] || [];
+    },
+    [nearbyAnchor, nearbyItems, viewportItems, tabData]
   );
 
   return (
     <div className="map-container">
       <MapFloatingHeader
+        onSearchHere={handleSearchHereClick}
+        onClearViewport={clearViewportItems}
+        actionsDisabled={actionsDisabled}
+        viewportLoading={viewportLoading}
+        nearbyAnchor={nearbyAnchor}
         visibleCategories={visibleCategories}
         onToggleCategory={toggleCategory}
         controlsOpen={controlsOpen}
@@ -138,20 +164,12 @@ function MapInner({ center, hotels, mapType, visibleCategories, toggleCategory, 
             : null
         )}
 
-        {hotels.map((hotel) => (
-          <MemoHotelMarker
-            key={hotel.placeId}
-            hotel={hotel}
-            isSelected={selectedHotelId === hotel.placeId}
-            onSelect={selectHotel}
-          />
-        ))}
-
         <MapTypeSync mapType={mapType} />
         <CenterSync lat={center.lat} lng={center.lng} skip={!!nearbyAnchor} />
         <FocusListener />
         <TransitLayer />
         <ProximityRing center={anchorHotel} radiusKm={PROXIMITY_KM} />
+        <SearchHereWatcher onUpdate={onUpdateSearchHere} />
       </Map>
 
       <MapControlsPanel open={controlsOpen} onToggle={onToggleControls} />
@@ -163,16 +181,33 @@ function MapInner({ center, hotels, mapType, visibleCategories, toggleCategory, 
 
 // ---- Floating header (rendered inside map-container for reliable painting) ---
 
-function MapFloatingHeader({ visibleCategories, onToggleCategory, controlsOpen, onToggleControls }) {
+function MapFloatingHeader({
+  onSearchHere, onClearViewport, actionsDisabled, viewportLoading, nearbyAnchor,
+  visibleCategories, onToggleCategory, controlsOpen, onToggleControls
+}) {
   return (
     <div className="map-floating-header">
-      <div className="map-floating-title">
-        <span aria-hidden>🗺</span>
-        <span>Map</span>
+      <div className="map-action-group">
+        <button
+          type="button"
+          className="viewport-pill clear"
+          onClick={onSearchHere}
+          disabled={actionsDisabled}
+          title="Search for places in the current map area"
+        >
+          {viewportLoading && !nearbyAnchor ? 'Searching…' : 'Search here'}
+        </button>
+        <button
+          type="button"
+          className="viewport-pill"
+          onClick={onClearViewport}
+          disabled={actionsDisabled}
+          title="Reset to city-wide results and pan back to city"
+        >
+          Reset to city view
+        </button>
       </div>
-      <div className="map-floating-center">
-        <ViewportRefreshIndicator />
-      </div>
+      <div className="map-floating-center" />
       <div className="map-header-right">
         <CategoryTogglePanel visible={visibleCategories} onToggle={onToggleCategory} />
         <button
@@ -256,29 +291,6 @@ const MemoPOIMarker = memo(POIMarker, (prev, next) => {
     prev.index === next.index &&
     prev.category === next.category &&
     prev.anchor?.placeId === next.anchor?.placeId &&
-    prev.isSelected === next.isSelected &&
-    prev.onSelect === next.onSelect
-  );
-});
-
-function HotelMarker({ hotel, isSelected, onSelect }) {
-  const onClick = useCallback(() => onSelect(hotel), [onSelect, hotel]);
-
-  return (
-    <AdvancedMarker
-      position={{ lat: hotel.lat, lng: hotel.lng }}
-      title={hotel.name}
-      onClick={onClick}
-      zIndex={isSelected ? 1000 : 100}
-    >
-      <div className={`map-marker-hotel${isSelected ? ' selected' : ''}`}>🛏</div>
-    </AdvancedMarker>
-  );
-}
-
-const MemoHotelMarker = memo(HotelMarker, (prev, next) => {
-  return (
-    prev.hotel.placeId === next.hotel.placeId &&
     prev.isSelected === next.isSelected &&
     prev.onSelect === next.onSelect
   );
@@ -439,6 +451,45 @@ function ViewportWatcher({ centerLat, centerLng }) {
   return null;
 }
 
+// ---- Search-here watcher (mounted inside <Map>) -------------------------
+// Fires onShow when the map has moved > 1 km from city center OR zoom has
+// shifted by more than 1 stop. Fires onHide when the user pans back close.
+
+// Always tracks current map center+radius so "Search here" reflects where the
+// user is looking, regardless of how far they've moved from the city center.
+function SearchHereWatcher({ onUpdate }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!map) return undefined;
+
+    const handleIdle = () => {
+      const c = map.getCenter();
+      if (!c) return;
+      const bounds = map.getBounds();
+      let radiusMeters = 5000;
+      if (bounds) {
+        const ne = bounds.getNorthEast();
+        const sw = bounds.getSouthWest();
+        const diagKm = haversineKm(
+          { lat: ne.lat(), lng: ne.lng() },
+          { lat: sw.lat(), lng: sw.lng() }
+        );
+        radiusMeters = Math.max(1500, Math.round((diagKm / 2) * 1000));
+      }
+      onUpdate({ lat: c.lat(), lng: c.lng(), radiusMeters });
+    };
+
+    const listener = map.addListener('idle', handleIdle);
+    return () => {
+      if (listener?.remove) listener.remove();
+      else if (window.google?.maps?.event) window.google.maps.event.removeListener(listener);
+    };
+  }, [map, onUpdate]);
+
+  return null;
+}
+
 // ---- Floating UI elements ------------------------------------------------
 
 function NearbyModeIndicator() {
@@ -457,23 +508,3 @@ function NearbyModeIndicator() {
   );
 }
 
-function ViewportRefreshIndicator() {
-  const { viewportLoading, viewportItems, clearViewportItems, nearbyAnchor } = useTrip();
-  if (nearbyAnchor) return null;
-  if (viewportLoading) {
-    return <div className="viewport-pill loading">Updating area…</div>;
-  }
-  if (viewportItems) {
-    return (
-      <button
-        type="button"
-        className="viewport-pill clear"
-        onClick={clearViewportItems}
-        title="Restore the original city-wide list"
-      >
-        Reset to city view
-      </button>
-    );
-  }
-  return null;
-}
