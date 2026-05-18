@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { BedDouble, Plus, X, Sun, Sunset, Moon, AlertCircle } from 'lucide-react';
 import { useTrip } from '../hooks/useTrip';
@@ -39,33 +39,49 @@ export default function PlanMode({ list }) {
 
   const [picker, setPicker] = useState(null); // { dayIndex, phase } | null
   const [hotelPicker, setHotelPicker] = useState(null); // { dayIndex } | null
+  const [activeDayIndex, setActiveDayIndex] = useState(0);
+
+  // Clamp active day if days shrinks.
+  useEffect(() => {
+    if (activeDayIndex >= plan.days) setActiveDayIndex(Math.max(0, plan.days - 1));
+  }, [plan.days, activeDayIndex]);
 
   if (!list) return null;
 
-  const onDaysChange = (n) => apply(setDays(plan, n));
+  const addDay = () => {
+    const next = setDays(plan, plan.days + 1);
+    apply(next);
+    setActiveDayIndex(next.days - 1);
+  };
+
+  const activeDay = plan.itinerary[activeDayIndex];
 
   return (
     <div className="plan-mode">
       <div className="plan-header">
-        <div className="plan-days-control">
-          <label className="plan-days-label">Days</label>
-          <div className="plan-days-stepper">
+        <div className="plan-day-tabs" role="tablist" aria-label="Days">
+          {plan.itinerary.map((_, i) => (
             <button
+              key={i}
               type="button"
-              className="plan-step-btn"
-              onClick={() => onDaysChange(plan.days - 1)}
-              disabled={plan.days <= 1}
-              aria-label="Fewer days"
-            >−</button>
-            <span className="plan-days-count">{plan.days}</span>
-            <button
-              type="button"
-              className="plan-step-btn"
-              onClick={() => onDaysChange(plan.days + 1)}
-              disabled={plan.days >= 30}
-              aria-label="More days"
-            >+</button>
-          </div>
+              role="tab"
+              aria-selected={i === activeDayIndex}
+              className={`plan-day-tab ${i === activeDayIndex ? 'active' : ''}`}
+              onClick={() => setActiveDayIndex(i)}
+            >
+              Day {i + 1}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="plan-day-tab plan-day-add"
+            onClick={addDay}
+            disabled={plan.days >= 30}
+            aria-label="Add day"
+            title="Add day"
+          >
+            <Plus size={13} strokeWidth={2.25} aria-hidden />
+          </button>
         </div>
         <div className="plan-total-line">
           {totalExpenseLabel(plan)}
@@ -78,22 +94,22 @@ export default function PlanMode({ list }) {
         </div>
       )}
 
-      {plan.itinerary.map((day, dayIndex) => (
+      {activeDay && (
         <DayBlock
-          key={dayIndex}
-          dayIndex={dayIndex}
-          day={day}
+          key={activeDayIndex}
+          dayIndex={activeDayIndex}
+          day={activeDay}
           itemById={itemById}
-          onOpenPicker={(phase) => setPicker({ dayIndex, phase })}
-          onOpenHotelPicker={() => setHotelPicker({ dayIndex })}
+          onOpenPicker={(phase) => setPicker({ dayIndex: activeDayIndex, phase })}
+          onOpenHotelPicker={() => setHotelPicker({ dayIndex: activeDayIndex })}
           onUpdateSession={(args) => apply(updateSession(plan, args))}
           onRemoveSession={(args) => apply(removeSession(plan, args))}
           onRemoveHotel={(hotelId) => {
-            const next = day.hotels.filter((id) => id !== hotelId);
-            apply(setHotelsForDay(plan, { dayIndex, hotels: next }));
+            const next = activeDay.hotels.filter((id) => id !== hotelId);
+            apply(setHotelsForDay(plan, { dayIndex: activeDayIndex, hotels: next }));
           }}
         />
-      ))}
+      )}
 
       {picker && createPortal(
         <PlacePickerModal

@@ -1937,35 +1937,53 @@ input { font-family: inherit; }
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
 }
-.plan-days-control { display: flex; align-items: center; gap: 10px; }
-.plan-days-label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
-.plan-days-stepper {
-  display: inline-flex;
+.plan-day-tabs {
+  display: flex;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 4px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 2px;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+  flex: 1;
+  min-width: 0;
 }
-.plan-step-btn {
-  width: 26px; height: 26px;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  font-size: 16px;
+.plan-day-tabs::-webkit-scrollbar { display: none; }
+.plan-day-tab {
+  flex-shrink: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
   font-weight: 600;
+  padding: 6px 12px;
   border-radius: 999px;
   cursor: pointer;
+  white-space: nowrap;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
 }
-.plan-step-btn:hover:not(:disabled) { background: var(--bg); }
-.plan-step-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.plan-days-count {
-  min-width: 22px;
-  text-align: center;
-  font-size: 14px;
-  font-weight: 700;
+.plan-day-tab:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text);
 }
+.plan-day-tab.active {
+  background: var(--text);
+  color: var(--bg-elevated);
+  border-color: var(--text);
+}
+.plan-day-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-style: dashed;
+}
+.plan-day-add:disabled { opacity: 0.35; cursor: not-allowed; }
 .plan-total-line { font-size: 12px; color: var(--text-muted); }
 
 .plan-empty-hint {
