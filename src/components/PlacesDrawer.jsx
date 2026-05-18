@@ -30,12 +30,16 @@ export default function PlacesDrawer() {
     if (btn) btn.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
   }, [activeTab]);
 
-  // Close desktop drawer on outside click
+  // Close desktop drawer on outside click — but ignore clicks on portaled
+  // overlays (detail panel backdrop, plan picker modals), since those live
+  // outside drawerRef and would otherwise collapse the drawer when the user
+  // dismisses a detail card.
   useEffect(() => {
     function onClick(e) {
-      if (drawerRef.current && !drawerRef.current.contains(e.target)) {
-        setDesktopExpanded(false);
-      }
+      if (!drawerRef.current) return;
+      if (drawerRef.current.contains(e.target)) return;
+      if (e.target.closest('.detail-backdrop, .detail-panel, .plan-modal-overlay')) return;
+      setDesktopExpanded(false);
     }
     if (desktopExpanded) document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);

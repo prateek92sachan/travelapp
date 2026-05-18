@@ -1930,7 +1930,13 @@ input { font-family: inherit; }
   box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 
-.plan-mode { display: flex; flex-direction: column; gap: 18px; }
+.plan-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  max-width: 100%;
+}
 
 .plan-header {
   display: flex;
@@ -1970,9 +1976,9 @@ input { font-family: inherit; }
   color: var(--text);
 }
 .plan-day-tab.active {
-  background: var(--text);
-  color: var(--bg-elevated);
-  border-color: var(--text);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 .plan-day-add {
   display: inline-flex;
@@ -2000,6 +2006,10 @@ input { font-family: inherit; }
   border-radius: 14px;
   padding: 12px 14px;
   background: var(--bg-elevated);
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 .plan-day-head {
   display: flex;
@@ -2107,6 +2117,10 @@ input { font-family: inherit; }
   border-radius: 10px;
   padding: 8px 10px;
   background: var(--bg);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 .plan-session-photo {
   width: 56px;
@@ -2169,7 +2183,8 @@ input { font-family: inherit; }
   border-color: var(--accent);
 }
 .plan-inline-input[type="time"] {
-  width: 78px;
+  width: 74px;
+  flex-shrink: 0;
 }
 .plan-inline-expense {
   flex: 1;
