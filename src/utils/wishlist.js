@@ -185,3 +185,12 @@ export function replaceWishlist(data) {
   const normalized = normalize(data || {});
   return persist(normalized);
 }
+
+export function updatePlanForList({ listId, plan }) {
+  if (!listId) return getWishlist();
+  const wishlist = getWishlist();
+  const lists = wishlist.lists.map((list) =>
+    list.id === listId ? { ...list, plan, updatedAt: Date.now() } : list
+  );
+  return persist({ ...wishlist, lists });
+}

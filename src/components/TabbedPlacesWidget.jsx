@@ -7,6 +7,7 @@ import { directionsUrl, fetchPlaceDetails } from '../services/googleMaps';
 import { fetchWikiSummary } from '../services/wikipedia';
 import { fetchPlaceDescription } from '../services/gemini';
 import { SavedPlaceCard } from './WishlistPanel';
+import PlanMode from './PlanMode';
 import { formatCount } from '../utils/format';
 import { shortenAddress } from '../utils/shortenAddress';
 
@@ -228,6 +229,7 @@ function WishlistTab({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [addForm, setAddForm] = useState(EMPTY_ADD_FORM);
+  const [mode, setMode] = useState('saved'); // 'saved' | 'plan'
 
   const longPressTimer = useRef(null);
   const didLongPress = useRef(false);
@@ -364,7 +366,30 @@ function WishlistTab({
             <button type="submit" className="btn btn-ghost">Rename</button>
           </form>
 
-          {activeList.items.length === 0 ? (
+          <div className="wishlist-mode-toggle" role="tablist" aria-label="View mode">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'saved'}
+              className={`wishlist-mode-btn ${mode === 'saved' ? 'active' : ''}`}
+              onClick={() => setMode('saved')}
+            >
+              Saved
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'plan'}
+              className={`wishlist-mode-btn ${mode === 'plan' ? 'active' : ''}`}
+              onClick={() => setMode('plan')}
+            >
+              Plan
+            </button>
+          </div>
+
+          {mode === 'plan' ? (
+            <PlanMode list={activeList} />
+          ) : activeList.items.length === 0 ? (
             <div className="wishlist-empty-panel">
               This list is empty. Go back to Activities, Restaurants, Nature, or Hidden gems and save cards.
             </div>
@@ -380,6 +405,7 @@ function WishlistTab({
             </div>
           )}
 
+          {mode === 'saved' && (
           <button
             type="button"
             className={`wishlist-add-trigger ${showAddForm ? 'open' : ''}`}
@@ -387,8 +413,9 @@ function WishlistTab({
           >
             {showAddForm ? '✕' : '+ Add'}
           </button>
+          )}
 
-          {showAddForm && (
+          {mode === 'saved' && showAddForm && (
             <form ref={addFormRef} className="wishlist-add-form" onSubmit={handleAddSubmit}>
               <input
                 className="input"

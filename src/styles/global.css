@@ -1904,6 +1904,332 @@ input { font-family: inherit; }
   border-radius: 999px;
 }
 
+/* ===== Plan mode ========================================================= */
+.wishlist-mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px;
+  margin: 8px 0 14px;
+  background: var(--bg);
+}
+.wishlist-mode-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.wishlist-mode-btn.active {
+  background: var(--bg-elevated);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.plan-mode { display: flex; flex-direction: column; gap: 18px; }
+
+.plan-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.plan-days-control { display: flex; align-items: center; gap: 10px; }
+.plan-days-label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+.plan-days-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px;
+}
+.plan-step-btn {
+  width: 26px; height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.plan-step-btn:hover:not(:disabled) { background: var(--bg); }
+.plan-step-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.plan-days-count {
+  min-width: 22px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+}
+.plan-total-line { font-size: 12px; color: var(--text-muted); }
+
+.plan-empty-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+}
+
+.plan-day {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: var(--bg-elevated);
+}
+.plan-day-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+.plan-day-title { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; }
+.plan-day-total { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+
+.plan-hotels-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
+  color: var(--text-muted);
+}
+.plan-hotels-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+}
+.plan-hotels-empty { font-size: 12px; color: var(--text-muted); font-style: italic; }
+.plan-hotel-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(14, 165, 233, 0.1);
+  color: var(--text);
+  font-size: 12px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  max-width: 220px;
+}
+.plan-hotel-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-chip-x {
+  width: 18px; height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.06);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--text);
+}
+.plan-chip-x:hover { background: rgba(0,0,0,0.12); }
+
+.plan-add-hotel-btn,
+.plan-add-session-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.plan-add-hotel-btn:hover,
+.plan-add-session-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.plan-add-session-btn { margin-top: 6px; align-self: flex-start; }
+
+.plan-phase { margin-top: 10px; }
+.plan-phase-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.plan-phase-label { letter-spacing: 0.01em; }
+.plan-phase-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.plan-phase-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 2px;
+}
+
+.plan-session {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+}
+.plan-session-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.plan-session-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  flex: 1;
+  min-width: 0;
+}
+.plan-session-addr {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.plan-session-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+.plan-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.plan-field > span {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.plan-field input {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.plan-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.plan-field-readout {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.plan-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  background: rgba(0,0,0,0.4);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: backdrop-fade 160ms ease-out;
+}
+.plan-modal {
+  width: 100%;
+  max-width: 560px;
+  max-height: 78vh;
+  background: var(--bg-elevated);
+  border-radius: 18px 18px 0 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  animation: slide-up 200ms ease-out;
+}
+.plan-modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.plan-modal-title { font-size: 14px; font-weight: 700; }
+.plan-modal-search { width: 100%; margin-bottom: 8px; }
+.plan-modal-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.plan-modal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: var(--text);
+}
+.plan-modal-row:hover { border-color: var(--border-strong); }
+.plan-modal-row.selected {
+  border-color: var(--accent);
+  background: rgba(255, 56, 92, 0.05);
+}
+.plan-modal-row-main { flex: 1; min-width: 0; }
+.plan-modal-row-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.plan-modal-row-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: capitalize;
+  margin-top: 2px;
+}
+.plan-modal-row-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: #c2410c;
+  background: rgba(249, 115, 22, 0.12);
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 /* Activity detail panel */
 .detail-backdrop {
   position: fixed;

@@ -35,7 +35,8 @@ import {
   removeWishlistPlace,
   replaceWishlist,
   saveWishlistPlace,
-  selectWishlist
+  selectWishlist,
+  updatePlanForList
 } from '../utils/wishlist';
 import { useAuth } from './useAuth';
 
@@ -611,6 +612,10 @@ export function TripProvider({ children }) {
     setWishlist(deleteWishlist(listId));
   }, []);
 
+  const updateListPlan = useCallback((listId, plan) => {
+    setWishlist(updatePlanForList({ listId, plan }));
+  }, []);
+
   const isWishlisted = useCallback(
     (placeId, listId = activeWishlistId) => isPlaceWishlisted(wishlist, listId, placeId),
     [wishlist, activeWishlistId]
@@ -808,6 +813,7 @@ export function TripProvider({ children }) {
       addPlaceToSmartWishlist,
       removePlaceFromWishlist,
       isWishlisted,
+      updateListPlan,
       effectiveListId,
       viewportCity,
       mapType,
@@ -855,6 +861,7 @@ export function TripProvider({ children }) {
       addPlaceToSmartWishlist,
       removePlaceFromWishlist,
       isWishlisted,
+      updateListPlan,
       effectiveListId,
       viewportCity,
       mapType,
