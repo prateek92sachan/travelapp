@@ -120,19 +120,6 @@ function TabbedPlacesWidget({ expandable = true }) {
     return () => cancelAnimationFrame(raf);
   }, [activeTabItems]);
 
-  // Close detail panel on click-outside, but let place-row clicks go through
-  // so selecting a new place while another is open works in one tap.
-  useEffect(() => {
-    if (!selected) return;
-    function handlePointerDown(e) {
-      if (e.target.closest('.detail-panel')) return;
-      if (e.target.closest('.activity-item')) return;
-      selectPlace(null);
-    }
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
-  }, [selected, selectPlace]);
-
   return (
     <>
       <Card

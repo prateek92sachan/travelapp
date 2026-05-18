@@ -505,10 +505,10 @@ export function TripProvider({ children }) {
 
   const selectPlace = useCallback((place, category) => {
     if (!place) {
-      // Close detail but keep selectedPlaceId — preserves list highlight for
-      // context after the user dismisses the detail card.
       setSelectedPlace(null);
+      setSelectedPlaceId(null);
       setSelectedHotelId(null);
+      saveUIState({ activeTab: activeTabRef.current, selectedPlaceId: null });
       return;
     }
     // Switch tab first (before setting selectedPlaceId) so React batches both
