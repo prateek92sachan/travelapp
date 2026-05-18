@@ -32,7 +32,16 @@
       "Bash(ls tests/)",
       "Bash(npm list *)",
       "Bash(where playwright *)",
-      "Bash(del CLAUDE.original.md)"
+      "Bash(del CLAUDE.original.md)",
+      "Bash(npx -y firebase-tools@latest deploy --only hosting)",
+      "Bash(npx firebase *)",
+      "Bash(Get-ChildItem *)",
+      "Bash(git check-ignore *)",
+      "Bash(xargs wc -l)",
+      "Bash(firebase deploy *)",
+      "Bash(curl -s https://travel-app-86055.web.app/)",
+      "Bash(curl -s -L https://travel-app-86055.web.app/ -o page.html)",
+      "Bash(grep '\\\\.js$')"
     ]
   }
 }

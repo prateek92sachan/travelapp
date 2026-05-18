@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Compass, Utensils, Leaf, Gem, BedDouble, Heart, Navigation, Phone, Globe } from 'lucide-react';
 import Card from './Card';
 import { useTrip } from '../hooks/useTrip';
@@ -596,7 +597,9 @@ const PlaceDetail = memo(function PlaceDetail({
 
   const toggleWishlist = () => { if (saved) onRemove(); else onSave(); };
 
-  return (
+  return createPortal(
+    <>
+      <div className="detail-backdrop" onClick={onClose} aria-hidden />
     <div className="detail-panel" role="dialog" aria-label="Place details">
       <div className="detail-header">
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -726,6 +729,8 @@ const PlaceDetail = memo(function PlaceDetail({
         </button>
       </div>
     </div>
+    </>,
+    document.body
   );
 }, (prev, next) =>
   prev.place === next.place &&

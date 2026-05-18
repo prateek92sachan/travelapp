@@ -7,10 +7,12 @@ import {
   getRedirectResult,
   signOut as firebaseSignOut,
   onAuthStateChanged,
+  browserPopupRedirectResolver,
   saveUserData,
   loadUserData,
 } from '../services/firebase';
 
+const isMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 const AuthContext = createContext(null);
 
@@ -26,8 +28,9 @@ export function AuthProvider({ children }) {
     let unsubscribe;
     try {
       const auth = getAuth();
-      // Consume the redirect result on page load (mobile sign-in flow)
-      getRedirectResult(auth).catch((err) => console.warn('Redirect result error:', err));
+      getRedirectResult(auth, browserPopupRedirectResolver)
+        .then((result) => { if (result?.user) setUser(result.user); })
+        .catch((err) => console.warn('Redirect result error:', err));
       unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
         setUser(firebaseUser);
         setAuthReady(true);
@@ -42,15 +45,10 @@ export function AuthProvider({ children }) {
   const signIn = useCallback(async () => {
     const auth = getAuth();
     const provider = new GoogleAuthProvider();
-    try {
-      return await signInWithPopup(auth, provider);
-    } catch (err) {
-      // Only fall back to redirect if the popup was explicitly blocked by the browser
-      if (err.code === 'auth/popup-blocked') {
-        return signInWithRedirect(auth, provider);
-      }
-      throw err;
+    if (isMobile()) {
+      return signInWithRedirect(auth, provider, browserPopupRedirectResolver);
     }
+    return signInWithPopup(auth, provider, browserPopupRedirectResolver);
   }, []);
 
   const signOut = useCallback(async () => {

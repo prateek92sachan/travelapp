@@ -1,4 +1,5 @@
-import { createPortal, useMemo } from 'react';
+import { useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useTrip } from '../hooks/useTrip';
 import { useAuth } from '../hooks/useAuth';
 import { SavedPlaceCard } from './WishlistPanel';

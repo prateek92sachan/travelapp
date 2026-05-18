@@ -1383,8 +1383,8 @@ input { font-family: inherit; }
   box-shadow: 0 4px 16px rgba(0,0,0,0.30);
 }
 .activity-item.selected {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  border-color: var(--border-strong);
+  background: var(--bg-elevated);
 }
 .activity-item:focus-visible {
   outline: 2px solid var(--accent);
@@ -1905,6 +1905,19 @@ input { font-family: inherit; }
 }
 
 /* Activity detail panel */
+.detail-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 9000;
+  animation: backdrop-fade 180ms ease-out;
+}
+@keyframes backdrop-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 .detail-panel {
   position: fixed;
   bottom: 16px;
@@ -1918,7 +1931,7 @@ input { font-family: inherit; }
   border-radius: var(--radius);
   box-shadow: var(--shadow-2);
   padding: 16px;
-  z-index: 80;
+  z-index: 9001;
   animation: slide-up 220ms ease-out;
 }
 @keyframes spin {

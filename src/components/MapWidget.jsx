@@ -140,14 +140,6 @@ function MapInner({ center, mapType, visibleCategories, toggleCategory, controls
         colorScheme={theme === 'dark' ? 'DARK' : 'LIGHT'}
         style={{ width: '100%', height: '100%' }}
       >
-        <AdvancedMarker
-          position={{ lat: center.lat, lng: center.lng }}
-          title={center.formattedAddress}
-          zIndex={500}
-        >
-          <div className="map-marker-center">★</div>
-        </AdvancedMarker>
-
         {CATEGORY_KEYS.map((cat) =>
           visibleCategories[cat]
             ? markersForCat(cat).slice(0, 7).map((poi, i) => (
@@ -166,6 +158,7 @@ function MapInner({ center, mapType, visibleCategories, toggleCategory, controls
 
         <MapTypeSync mapType={mapType} />
         <CenterSync lat={center.lat} lng={center.lng} skip={!!nearbyAnchor} />
+        <DensityCentering tabData={tabData} skip={!!nearbyAnchor || !!viewportItems} />
         <FocusListener />
         <TransitLayer />
         <ProximityRing center={anchorHotel} radiusKm={PROXIMITY_KM} />
@@ -327,6 +320,51 @@ function CenterSync({ lat, lng, skip }) {
     return () => window.removeEventListener('travelapp:panToCity', onReset);
   }, [map]);
 
+  return null;
+}
+
+// Pans the map once per (re)mount to the centroid of the densest pin cluster.
+// "Densest" = pick the marker with the most neighbors within DENSITY_RADIUS_KM,
+// then return the centroid of that cluster. Skips while in nearby/viewport modes
+// (those have their own framing logic).
+const DENSITY_RADIUS_KM = 3;
+
+function densestCentroid(pins) {
+  if (!pins || pins.length < 2) return null;
+  let bestIdx = 0;
+  let bestCount = -1;
+  for (let i = 0; i < pins.length; i++) {
+    let count = 0;
+    for (let j = 0; j < pins.length; j++) {
+      if (haversineKm(pins[i], pins[j]) <= DENSITY_RADIUS_KM) count++;
+    }
+    if (count > bestCount) { bestCount = count; bestIdx = i; }
+  }
+  const anchor = pins[bestIdx];
+  const cluster = pins.filter((p) => haversineKm(anchor, p) <= DENSITY_RADIUS_KM);
+  const lat = cluster.reduce((s, p) => s + p.lat, 0) / cluster.length;
+  const lng = cluster.reduce((s, p) => s + p.lng, 0) / cluster.length;
+  return { lat, lng };
+}
+
+function DensityCentering({ tabData, skip }) {
+  const map = useMap();
+  const firedRef = useRef(false);
+  useEffect(() => {
+    if (!map || skip || firedRef.current) return;
+    const all = [];
+    for (const cat of CATEGORY_KEYS) {
+      const items = tabData?.[cat] || [];
+      for (const p of items.slice(0, 7)) {
+        if (typeof p.lat === 'number' && typeof p.lng === 'number') all.push(p);
+      }
+    }
+    if (all.length < 3) return;
+    const target = densestCentroid(all);
+    if (!target) return;
+    firedRef.current = true;
+    map.panTo(target);
+  }, [map, tabData, skip]);
   return null;
 }
 

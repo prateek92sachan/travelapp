@@ -30,9 +30,12 @@ export default defineConfig({
         ]
       },
       devOptions: {
-        enabled: true
+        enabled: false
       },
       workbox: {
+        skipWaiting: true,
+        clientsClaim: true,
+        navigateFallbackDenylist: [/^\/__\//],
         runtimeCaching: [
           {
             // Geocoding: stable results, cache aggressively

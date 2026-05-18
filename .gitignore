@@ -5,6 +5,9 @@ node_modules/
 dist/
 dist-ssr/
 
+# Firebase deploy cache
+.firebase/
+
 # Environment files - NEVER commit these
 .env
 .env.local
