@@ -2083,10 +2083,27 @@ input { font-family: inherit; }
 }
 
 .plan-session {
+  display: flex;
+  gap: 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: var(--bg);
+}
+.plan-session-photo {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+.plan-session-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .plan-session-head {
   display: flex;
@@ -2100,49 +2117,57 @@ input { font-family: inherit; }
   letter-spacing: -0.01em;
   flex: 1;
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .plan-session-addr {
   font-size: 11px;
   color: var(--text-muted);
-  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.plan-session-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
-  margin-top: 10px;
-}
-.plan-field {
+.plan-session-row {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  flex-wrap: wrap;
 }
-.plan-field > span {
-  font-size: 10px;
-  color: var(--text-muted);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.plan-field input {
-  width: 100%;
+.plan-inline-input {
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   color: var(--text);
-  border-radius: 8px;
-  padding: 6px 8px;
-  font-size: 12px;
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 11px;
   font-family: inherit;
+  width: auto;
+  min-width: 0;
 }
-.plan-field input:focus {
+.plan-inline-input:focus {
   outline: none;
   border-color: var(--accent);
 }
-.plan-field-readout {
-  padding: 6px 8px;
-  font-size: 12px;
-  color: var(--text);
+.plan-inline-input[type="time"] {
+  width: 78px;
+}
+.plan-inline-expense {
+  flex: 1;
+  min-width: 50px;
+  max-width: 90px;
+}
+.plan-inline-sep {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.plan-inline-dur {
+  font-size: 11px;
   font-weight: 600;
+  color: var(--text);
+  margin: 0 6px;
+  white-space: nowrap;
 }
 
 .plan-modal-overlay {
@@ -2202,6 +2227,17 @@ input { font-family: inherit; }
 .plan-modal-row.selected {
   border-color: var(--accent);
   background: rgba(255, 56, 92, 0.05);
+}
+.plan-modal-row-photo {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+.plan-modal-row-photo.placeholder {
+  background: linear-gradient(135deg, var(--border) 0%, var(--bg-elevated) 100%);
 }
 .plan-modal-row-main { flex: 1; min-width: 0; }
 .plan-modal-row-name {

@@ -240,51 +240,57 @@ function SessionCard({ session, place, onChange, onRemove }) {
   const mins = durationMinutes(session.startTime, session.endTime);
   return (
     <div className="plan-session">
-      <div className="plan-session-head">
-        <div className="plan-session-name">{place?.name || '(removed from list)'}</div>
-        <button
-          type="button"
-          className="plan-chip-x"
-          aria-label="Remove session"
-          onClick={onRemove}
-        >
-          <X size={12} strokeWidth={2} aria-hidden />
-        </button>
-      </div>
-      {place?.address && (
-        <div className="plan-session-addr">{place.address}</div>
+      {place?.photoUrl && (
+        <img
+          className="plan-session-photo"
+          src={place.photoUrl}
+          alt=""
+          loading="lazy"
+          onError={(e) => (e.currentTarget.style.display = 'none')}
+        />
       )}
-      <div className="plan-session-grid">
-        <label className="plan-field">
-          <span>Start</span>
+      <div className="plan-session-body">
+        <div className="plan-session-head">
+          <div className="plan-session-name">{place?.name || '(removed from list)'}</div>
+          <button
+            type="button"
+            className="plan-chip-x"
+            aria-label="Remove session"
+            onClick={onRemove}
+          >
+            <X size={12} strokeWidth={2} aria-hidden />
+          </button>
+        </div>
+        {place?.address && (
+          <div className="plan-session-addr">{place.address}</div>
+        )}
+        <div className="plan-session-row">
           <input
+            className="plan-inline-input"
             type="time"
             value={session.startTime}
             onChange={(e) => onChange({ startTime: e.target.value })}
+            aria-label="Start time"
           />
-        </label>
-        <label className="plan-field">
-          <span>End</span>
+          <span className="plan-inline-sep">→</span>
           <input
+            className="plan-inline-input"
             type="time"
             value={session.endTime}
             onChange={(e) => onChange({ endTime: e.target.value })}
+            aria-label="End time"
           />
-        </label>
-        <div className="plan-field">
-          <span>Duration</span>
-          <div className="plan-field-readout">{formatDuration(mins)}</div>
-        </div>
-        <label className="plan-field">
-          <span>Expense</span>
+          <span className="plan-inline-dur">{formatDuration(mins)}</span>
           <input
+            className="plan-inline-input plan-inline-expense"
             type="text"
             inputMode="decimal"
-            placeholder="0"
+            placeholder="₹"
             value={session.expense || ''}
             onChange={(e) => onChange({ expense: e.target.value })}
+            aria-label="Expense"
           />
-        </label>
+        </div>
       </div>
     </div>
   );
@@ -333,6 +339,17 @@ function PlacePickerModal({ items, plan, onClose, onPick, title }) {
                   className="plan-modal-row"
                   onClick={() => onPick(p)}
                 >
+                  {p.photoUrl ? (
+                    <img
+                      className="plan-modal-row-photo"
+                      src={p.photoUrl}
+                      alt=""
+                      loading="lazy"
+                      onError={(e) => (e.currentTarget.style.display = 'none')}
+                    />
+                  ) : (
+                    <div className="plan-modal-row-photo placeholder" aria-hidden />
+                  )}
                   <div className="plan-modal-row-main">
                     <div className="plan-modal-row-name">{p.name}</div>
                     {p.category && (
@@ -380,6 +397,17 @@ function HotelPickerModal({ hotels, currentDayHotels, onClose, onPick, title }) 
                   className={`plan-modal-row ${selected ? 'selected' : ''}`}
                   onClick={() => onPick(h.placeId)}
                 >
+                  {h.photoUrl ? (
+                    <img
+                      className="plan-modal-row-photo"
+                      src={h.photoUrl}
+                      alt=""
+                      loading="lazy"
+                      onError={(e) => (e.currentTarget.style.display = 'none')}
+                    />
+                  ) : (
+                    <div className="plan-modal-row-photo placeholder" aria-hidden />
+                  )}
                   <div className="plan-modal-row-main">
                     <div className="plan-modal-row-name">{h.name}</div>
                     {h.address && (
