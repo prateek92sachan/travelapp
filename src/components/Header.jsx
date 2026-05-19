@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Clock, Link2, Heart, Menu, Moon, Sun } from 'lucide-react';
+import { Clock, Link2, Heart, Menu, Moon, Sun, PlaneTakeoff } from 'lucide-react';
 import { useTrip } from '../hooks/useTrip';
 import { useTheme } from '../hooks/useTheme';
 import { useAuth } from '../hooks/useAuth';
@@ -137,7 +137,9 @@ export default function Header() {
               </div>
             )}
           </div>
-          <span>Travel</span>
+          {coords
+            ? <PlaneTakeoff size={22} strokeWidth={2} aria-label="Travel" />
+            : <span>Travel</span>}
         </div>
 
         {showSummary && (
