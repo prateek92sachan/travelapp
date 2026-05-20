@@ -1,8 +1,11 @@
 // Plan model lives inside each wishlist list as list.plan.
 // Shape:
-//   plan = { days, itinerary }
+//   plan = { days, itinerary, placeSnapshots }
 //   itinerary[i] = { hotels: [placeId, ...], phases: { morning, evening, night } }
 //   phases.morning = [ { id, placeId, startTime, endTime, expense } ]
+//   placeSnapshots = { [placeId]: { name, address, photoUrl, lat, lng, rating, reviewCount, category } }
+// Snapshots cover places added to the plan without being saved to the
+// list's items (when the user opts out of auto-save on the picker).
 
 export const PHASES = ['morning', 'evening', 'night'];
 
@@ -37,6 +40,7 @@ export function createEmptyPlan(days = 1) {
   return {
     days: n,
     itinerary: Array.from({ length: n }, makeEmptyDay),
+    placeSnapshots: {},
   };
 }
 
@@ -54,7 +58,42 @@ export function ensurePlan(plan) {
       },
     };
   });
-  return { days, itinerary };
+  return {
+    days,
+    itinerary,
+    placeSnapshots:
+      plan.placeSnapshots && typeof plan.placeSnapshots === 'object' ? plan.placeSnapshots : {},
+  };
+}
+
+function placeToSnapshot(place, category) {
+  return {
+    placeId: place.placeId,
+    name: place.name,
+    address: place.address,
+    photoUrl: place.photoUrl,
+    lat: place.lat,
+    lng: place.lng,
+    rating: place.rating,
+    reviewCount: place.reviewCount,
+    estCost: place.estCost,
+    estDuration: place.estDuration,
+    category: category || place.category,
+  };
+}
+
+// Attach (or refresh) a snapshot for any place the plan refers to so it can
+// render even if it was never saved into the list's items.
+export function setPlaceSnapshot(plan, place, category) {
+  const current = ensurePlan(plan);
+  if (!place?.placeId) return current;
+  return {
+    ...current,
+    placeSnapshots: {
+      ...current.placeSnapshots,
+      [place.placeId]: placeToSnapshot(place, category),
+    },
+  };
 }
 
 export function setDays(plan, nextDays) {
@@ -63,9 +102,17 @@ export function setDays(plan, nextDays) {
   if (n === current.days) return current;
   if (n > current.days) {
     const extra = Array.from({ length: n - current.days }, makeEmptyDay);
-    return { days: n, itinerary: [...current.itinerary, ...extra] };
+    return { ...current, days: n, itinerary: [...current.itinerary, ...extra] };
   }
-  return { days: n, itinerary: current.itinerary.slice(0, n) };
+  return { ...current, days: n, itinerary: current.itinerary.slice(0, n) };
+}
+
+export function removeDayAt(plan, dayIndex) {
+  const current = ensurePlan(plan);
+  if (current.days <= 1) return current;
+  if (dayIndex < 0 || dayIndex >= current.days) return current;
+  const itinerary = current.itinerary.filter((_, i) => i !== dayIndex);
+  return { ...current, days: itinerary.length, itinerary };
 }
 
 export function addSession(plan, { dayIndex, phase, placeId }) {

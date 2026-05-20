@@ -22,3 +22,7 @@
 - Never commit unless explicitly asked.
 - Never push to remote unless explicitly asked.
 - Design: Airbnb-like aesthetic — restrained color, generous whitespace, Lucide icons only, color-tint active states (never full-opacity fills). See memory for full design prefs.
+
+## Clarifications
+
+- **Always ask questions to get specific** before implementing any non-trivial feature or design change. Use the AskUserQuestion tool — short, targeted, max 4 questions per prompt. Do not assume library choice, data source, layout, interaction model, or scope. Only skip clarification for truly trivial work (single-line fix, typo, rename).

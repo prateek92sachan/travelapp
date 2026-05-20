@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Compass, Utensils, Leaf, Gem, BedDouble, Heart, Navigation, Phone, Globe } from 'lucide-react';
+import { Compass, Utensils, Leaf, Gem, BedDouble, Heart, Navigation, Phone, Globe, Info, Pencil, Trash2 } from 'lucide-react';
 import Card from './Card';
 import { useTrip } from '../hooks/useTrip';
 import { directionsUrl, fetchPlaceDetails } from '../services/googleMaps';
@@ -54,6 +54,45 @@ const PLACE_TABS = [
   { key: 'gems',        label: 'Hidden gems', Icon: Gem,       color: '#6366f1' },
   { key: 'hotels',      label: 'Hotels',      Icon: BedDouble, color: '#0ea5e9' },
 ];
+
+export { PLACE_TABS };
+
+function InfoTooltip({ text }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e) {
+      if (!ref.current?.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [open]);
+
+  return (
+    <span
+      ref={ref}
+      className={`info-tooltip ${open ? 'open' : ''}`}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        className="info-tooltip-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        aria-label="More info"
+        aria-expanded={open}
+      >
+        <Info size={14} strokeWidth={2} aria-hidden />
+      </button>
+      <span className="info-tooltip-bubble" role="tooltip">{text}</span>
+    </span>
+  );
+}
 
 function TabbedPlacesWidget({ expandable = true }) {
   const {
@@ -225,15 +264,17 @@ function WishlistTab({
   onRemove
 }) {
   const { addPlaceToWishlist, activeWishlistId } = useTrip();
-  const [renameValue, setRenameValue] = useState(activeList?.name || '');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [addForm, setAddForm] = useState(EMPTY_ADD_FORM);
   const [mode, setMode] = useState('saved'); // 'saved' | 'plan'
+  const [editingName, setEditingName] = useState(false);
+  const [editValue, setEditValue] = useState(activeList?.name || '');
 
   const longPressTimer = useRef(null);
   const didLongPress = useRef(false);
   const addFormRef = useRef(null);
+  const editInputRef = useRef(null);
 
   useEffect(() => {
     if (showAddForm && addFormRef.current) {
@@ -242,10 +283,34 @@ function WishlistTab({
   }, [showAddForm]);
 
   useEffect(() => {
-    setRenameValue(activeList?.name || '');
+    setEditValue(activeList?.name || '');
+    setEditingName(false);
   }, [activeList?.id, activeList?.name]);
 
+  useEffect(() => {
+    if (editingName) editInputRef.current?.focus();
+  }, [editingName]);
+
   useEffect(() => () => clearTimeout(longPressTimer.current), []);
+
+  function commitRename() {
+    if (!activeList) return;
+    const next = editValue.trim();
+    if (next && next !== activeList.name) onRename(activeList.id, next);
+    setEditingName(false);
+  }
+
+  function cancelRename() {
+    setEditValue(activeList?.name || '');
+    setEditingName(false);
+  }
+
+  function confirmDelete() {
+    if (!activeList) return;
+    if (window.confirm(`Delete "${activeList.name}"? This removes the list and its saved places.`)) {
+      onDelete(activeList.id);
+    }
+  }
 
   function handleChipPointerDown() {
     didLongPress.current = false;
@@ -281,15 +346,37 @@ function WishlistTab({
   return (
     <div className="wishlist-workspace">
       <div className="wishlist-workspace-head">
-        <div>
+        <div className="wishlist-workspace-title-row">
           <div className="wishlist-workspace-title">Wishlist workspace</div>
-          <div className="wishlist-workspace-copy">
-            Tap a list to switch. Hold to see all. Save cards from Activities, Restaurants, Nature, or Hidden gems — or add places manually.
-          </div>
+          <InfoTooltip
+            text="Tap a list to switch. Hold to see all. Save cards from Activities, Restaurants, Nature, Hidden gems, or Hotels — or add places manually."
+          />
         </div>
+        {activeList && (
+          <div className="wishlist-mode-toggle" role="tablist" aria-label="View mode">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'saved'}
+              className={`wishlist-mode-btn ${mode === 'saved' ? 'active' : ''}`}
+              onClick={() => setMode('saved')}
+            >
+              Saved
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'plan'}
+              className={`wishlist-mode-btn ${mode === 'plan' ? 'active' : ''}`}
+              onClick={() => setMode('plan')}
+            >
+              Plan
+            </button>
+          </div>
+        )}
       </div>
 
-      {lists.length > 0 && (
+      {lists.length > 1 && (
         <div className="wishlist-list-picker" aria-label="Wishlist lists">
           {lists.map((list) => (
             <button
@@ -336,54 +423,38 @@ function WishlistTab({
       ) : (
         <div className="wishlist-active-panel">
           <div className="wishlist-active-head">
-            <div>
-              <div className="wishlist-active-title">{shortListName(activeList.name)}</div>
-              <div className="wishlist-active-meta">
-                {activeList.items.length} saved place{activeList.items.length === 1 ? '' : 's'}
-              </div>
-            </div>
+            {editingName ? (
+              <input
+                ref={editInputRef}
+                className="wishlist-active-title-input"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+                  else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
+                }}
+                aria-label="List name"
+              />
+            ) : (
+              <button
+                type="button"
+                className="wishlist-active-title-btn"
+                onClick={() => setEditingName(true)}
+                title="Rename list"
+              >
+                <span className="wishlist-active-title">{shortListName(activeList.name)}</span>
+                <Pencil size={13} strokeWidth={1.75} aria-hidden className="wishlist-active-edit-icon" />
+              </button>
+            )}
             <button
               type="button"
-              className="btn btn-ghost wishlist-delete-btn"
-              onClick={() => onDelete(activeList.id)}
+              className="wishlist-delete-icon-btn"
+              onClick={confirmDelete}
+              aria-label="Delete list"
+              title="Delete list"
             >
-              Delete list
-            </button>
-          </div>
-          <form
-            className="wishlist-rename-row"
-            onSubmit={(e) => {
-              e.preventDefault();
-              onRename(activeList.id, renameValue);
-            }}
-          >
-            <input
-              className="input"
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              aria-label="Wishlist name"
-            />
-            <button type="submit" className="btn btn-ghost">Rename</button>
-          </form>
-
-          <div className="wishlist-mode-toggle" role="tablist" aria-label="View mode">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === 'saved'}
-              className={`wishlist-mode-btn ${mode === 'saved' ? 'active' : ''}`}
-              onClick={() => setMode('saved')}
-            >
-              Saved
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === 'plan'}
-              className={`wishlist-mode-btn ${mode === 'plan' ? 'active' : ''}`}
-              onClick={() => setMode('plan')}
-            >
-              Plan
+              <Trash2 size={15} strokeWidth={1.75} aria-hidden />
             </button>
           </div>
 

@@ -4,6 +4,7 @@ import Header from './components/Header';
 import WeatherFloat from './components/WeatherFloat';
 import MapWidget from './components/MapWidget';
 import PlacesDrawer from './components/PlacesDrawer';
+import EmptyStateGlobe from './components/EmptyStateGlobe';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useTrip } from './hooks/useTrip';
 import { useIsDesktop } from './hooks/useIsDesktop';
@@ -29,10 +30,9 @@ export default function App() {
           )}
 
           {!coords && !error && (
-            <div className="empty-hero">
-              <h2>Plan your next trip in seconds</h2>
-              <p>Enter a destination and a date above to see weather, top spots, and activities.</p>
-            </div>
+            <ErrorBoundary label="Globe">
+              <EmptyStateGlobe />
+            </ErrorBoundary>
           )}
 
           {coords && (
