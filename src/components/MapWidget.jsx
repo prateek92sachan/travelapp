@@ -2,8 +2,14 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Compass, Utensils, Leaf, Gem, BedDouble, Settings } from 'lucide-react';
 import { Map, AdvancedMarker, useMap } from '@vis.gl/react-google-maps';
 import { GOOGLE_MAPS_MAP_ID } from '../services/config';
+import { reverseGeocodePlaceName } from '../services/googleMaps';
 import Card from './Card';
 import { useTrip } from '../hooks/useTrip';
+import { useSearchStore } from '../stores/searchStore';
+import { useMapStore } from '../stores/mapStore';
+import { useTabQuery } from '../hooks/queries/useTabQuery';
+import { useNearbyQuery } from '../hooks/queries/useNearbyQuery';
+import { useViewportQuery } from '../hooks/queries/useViewportQuery';
 import { useTheme } from '../hooks/useTheme';
 import MapControlsPanel from './MapControlsPanel';
 import HotelInfoCard from './HotelInfoCard';
@@ -24,7 +30,9 @@ const CATEGORY_CONFIG = {
 const CATEGORY_KEYS = Object.keys(CATEGORY_CONFIG);
 
 export default function MapWidget() {
-  const { coords, loading, mapType } = useTrip();
+  const coords = useSearchStore((s) => s.coords);
+  const loading = useSearchStore((s) => s.loading);
+  const mapType = useMapStore((s) => s.mapType);
 
   const [visibleCategories, setVisibleCategories] = useState({
     activities: true,
@@ -73,31 +81,72 @@ export default function MapWidget() {
 
 function MapInner({ center, mapType, visibleCategories, toggleCategory, controlsOpen, onToggleControls }) {
   const { theme } = useTheme();
-  const {
-    tabData,
-    nearbyItems,
-    nearbyAnchor,
-    selectedPlaceId,
-    selectedHotelId,
-    selectPlace,
-    searchHere,
-    viewportLoading,
-    viewportItems,
-    clearViewportItems,
-  } = useTrip();
-
-  // Always-valid params: initialized to city center, updated on every map idle
-  const [searchHereParams, setSearchHereParams] = useState(
-    () => ({ lat: center.lat, lng: center.lng, radiusMeters: 20000 })
+  // Cross-domain callbacks stay on TripContext: selectPlace orchestrates
+  // tab switching + UI state + map pan event; clearViewportItems dispatches
+  // a pan-to-city event; search() drives the full orchestration flow.
+  const { selectPlace, clearViewportItems, search } = useTrip();
+  const setDestination = useSearchStore((s) => s.setDestination);
+  const loading = useSearchStore((s) => s.loading);
+  const selectedPlaceId = useSearchStore((s) => s.selectedPlaceId);
+  const nearbyAnchor = useMapStore((s) => s.nearbyAnchor);
+  const selectedHotelId = useMapStore((s) => s.selectedHotelId);
+  const viewportTarget = useMapStore((s) => s.viewportTarget);
+  // Tab data (5 queries) — these were exposed as a single tabData object
+  // from useTrip but we read each tab individually so this component only
+  // re-renders when a category it shows actually changes.
+  const { data: tabActivities } = useTabQuery('activities');
+  const { data: tabRestaurants } = useTabQuery('restaurants');
+  const { data: tabNature } = useTabQuery('nature');
+  const { data: tabGems } = useTabQuery('gems');
+  const { data: tabHotels } = useTabQuery('hotels');
+  const tabData = useMemo(
+    () => ({
+      activities: tabActivities ?? null,
+      restaurants: tabRestaurants ?? null,
+      nature: tabNature ?? null,
+      gems: tabGems ?? null,
+      hotels: tabHotels ?? null
+    }),
+    [tabActivities, tabRestaurants, tabNature, tabGems, tabHotels]
   );
-  const onUpdateSearchHere = useCallback((params) => setSearchHereParams(params), []);
+  const { data: nearbyAct } = useNearbyQuery({ anchor: nearbyAnchor, category: 'activities' });
+  const { data: nearbyRest } = useNearbyQuery({ anchor: nearbyAnchor, category: 'restaurants' });
+  const { data: nearbyNat } = useNearbyQuery({ anchor: nearbyAnchor, category: 'nature' });
+  const { data: nearbyGems } = useNearbyQuery({ anchor: nearbyAnchor, category: 'gems' });
+  const nearbyItems = useMemo(
+    () => ({
+      activities: nearbyAct ?? null,
+      restaurants: nearbyRest ?? null,
+      nature: nearbyNat ?? null,
+      gems: nearbyGems ?? null
+    }),
+    [nearbyAct, nearbyRest, nearbyNat, nearbyGems]
+  );
+  const { data: vpAct } = useViewportQuery({ target: viewportTarget, category: 'activities' });
+  const { data: vpRest } = useViewportQuery({ target: viewportTarget, category: 'restaurants' });
+  const { data: vpNat } = useViewportQuery({ target: viewportTarget, category: 'nature' });
+  const { data: vpGems } = useViewportQuery({ target: viewportTarget, category: 'gems' });
+  const { data: vpHotels } = useViewportQuery({ target: viewportTarget, category: 'hotels' });
+  const viewportItems = useMemo(() => {
+    if (!viewportTarget) return null;
+    return {
+      activities: vpAct ?? null,
+      restaurants: vpRest ?? null,
+      nature: vpNat ?? null,
+      gems: vpGems ?? null,
+      hotels: vpHotels ?? null
+    };
+  }, [viewportTarget, vpAct, vpRest, vpNat, vpGems, vpHotels]);
 
+  // Click "Search here" → commits whatever text is currently in the destination
+  // input (auto-updated by SearchHereWatcher on each idle) as a fresh full
+  // search: new geocode + Phase 1/2 fetch. Replaces tabs + map center.
   const handleSearchHereClick = useCallback(() => {
-    searchHere(searchHereParams);
-  }, [searchHere, searchHereParams]);
+    search();
+  }, [search]);
 
-  // Buttons disabled only while a viewport fetch is in-flight or nearby mode is active
-  const actionsDisabled = viewportLoading || !!nearbyAnchor;
+  // Buttons disabled while a full search is in-flight or nearby mode is active.
+  const actionsDisabled = loading || !!nearbyAnchor;
 
   const anchorHotel = useMemo(() => {
     if (nearbyAnchor) return nearbyAnchor;
@@ -120,7 +169,7 @@ function MapInner({ center, mapType, visibleCategories, toggleCategory, controls
         onSearchHere={handleSearchHereClick}
         onClearViewport={clearViewportItems}
         actionsDisabled={actionsDisabled}
-        viewportLoading={viewportLoading}
+        searchLoading={loading}
         nearbyAnchor={nearbyAnchor}
         visibleCategories={visibleCategories}
         onToggleCategory={toggleCategory}
@@ -162,7 +211,10 @@ function MapInner({ center, mapType, visibleCategories, toggleCategory, controls
         <FocusListener />
         <TransitLayer />
         <ProximityRing center={anchorHotel} radiusKm={PROXIMITY_KM} />
-        <SearchHereWatcher onUpdate={onUpdateSearchHere} />
+        <SearchHereWatcher
+          onSuggestName={setDestination}
+          skip={!!nearbyAnchor}
+        />
       </Map>
 
       <MapControlsPanel open={controlsOpen} onToggle={onToggleControls} />
@@ -175,7 +227,7 @@ function MapInner({ center, mapType, visibleCategories, toggleCategory, controls
 // ---- Floating header (rendered inside map-container for reliable painting) ---
 
 function MapFloatingHeader({
-  onSearchHere, onClearViewport, actionsDisabled, viewportLoading, nearbyAnchor,
+  onSearchHere, onClearViewport, actionsDisabled, searchLoading, nearbyAnchor,
   visibleCategories, onToggleCategory, controlsOpen, onToggleControls
 }) {
   return (
@@ -186,9 +238,9 @@ function MapFloatingHeader({
           className="viewport-pill clear"
           onClick={onSearchHere}
           disabled={actionsDisabled}
-          title="Search for places in the current map area"
+          title="Search for places centered on the current map view"
         >
-          {viewportLoading && !nearbyAnchor ? 'Searching…' : 'Search here'}
+          {searchLoading && !nearbyAnchor ? 'Searching…' : 'Search here'}
         </button>
         <button
           type="button"
@@ -386,7 +438,7 @@ function FocusListener() {
 
 function TransitLayer() {
   const map = useMap();
-  const { transitOn } = useTrip();
+  const transitOn = useMapStore((s) => s.transitOn);
   useEffect(() => {
     if (!map || !window.google?.maps?.TransitLayer) return;
     if (!transitOn) return undefined;
@@ -421,7 +473,8 @@ function ProximityRing({ center, radiusKm }) {
 
 function ViewportWatcher({ centerLat, centerLng }) {
   const map = useMap();
-  const { refreshViewport, nearbyAnchor } = useTrip();
+  const refreshViewport = useMapStore((s) => s.refreshViewport);
+  const nearbyAnchor = useMapStore((s) => s.nearbyAnchor);
   const lastTriggeredRef = useRef(null);
   const debounceRef = useRef(null);
   const initialFireSkippedRef = useRef(false);
@@ -490,32 +543,48 @@ function ViewportWatcher({ centerLat, centerLng }) {
 }
 
 // ---- Search-here watcher (mounted inside <Map>) -------------------------
-// Fires onShow when the map has moved > 1 km from city center OR zoom has
-// shifted by more than 1 stop. Fires onHide when the user pans back close.
-
-// Always tracks current map center+radius so "Search here" reflects where the
-// user is looking, regardless of how far they've moved from the city center.
-function SearchHereWatcher({ onUpdate }) {
+// On every map idle (after the first one, which is the initial settle right
+// after a search), reverse-geocode the current map center to a neighborhood/
+// city name and push it into the destination input via onSuggestName. The
+// "Search here" button then commits that text as a fresh full search.
+//
+// Skips while the destination input is focused (don't wipe user's typing) or
+// while nearby-mode is active (hotel-selected dims the rest of the UI).
+function SearchHereWatcher({ onSuggestName, skip }) {
   const map = useMap();
+  const firstIdleSkippedRef = useRef(false);
+  const requestSeqRef = useRef(0);
+  const skipRef = useRef(skip);
+  useEffect(() => { skipRef.current = skip; }, [skip]);
 
   useEffect(() => {
     if (!map) return undefined;
 
-    const handleIdle = () => {
+    const handleIdle = async () => {
+      if (!firstIdleSkippedRef.current) {
+        firstIdleSkippedRef.current = true;
+        return;
+      }
+      if (skipRef.current) return;
+
+      const active = document.activeElement;
+      if (active?.closest?.('.smart-search-wrap')) return;
+
       const c = map.getCenter();
       if (!c) return;
-      const bounds = map.getBounds();
-      let radiusMeters = 5000;
-      if (bounds) {
-        const ne = bounds.getNorthEast();
-        const sw = bounds.getSouthWest();
-        const diagKm = haversineKm(
-          { lat: ne.lat(), lng: ne.lng() },
-          { lat: sw.lat(), lng: sw.lng() }
-        );
-        radiusMeters = Math.max(1500, Math.round((diagKm / 2) * 1000));
-      }
-      onUpdate({ lat: c.lat(), lng: c.lng(), radiusMeters });
+      const lat = c.lat();
+      const lng = c.lng();
+
+      const seq = ++requestSeqRef.current;
+      const name = await reverseGeocodePlaceName({ lat, lng }).catch(() => null);
+      if (seq !== requestSeqRef.current) return;
+      if (!name) return;
+
+      // Re-check focus after async — user may have started typing mid-flight.
+      const activeNow = document.activeElement;
+      if (activeNow?.closest?.('.smart-search-wrap')) return;
+
+      onSuggestName(name);
     };
 
     const listener = map.addListener('idle', handleIdle);
@@ -523,7 +592,7 @@ function SearchHereWatcher({ onUpdate }) {
       if (listener?.remove) listener.remove();
       else if (window.google?.maps?.event) window.google.maps.event.removeListener(listener);
     };
-  }, [map, onUpdate]);
+  }, [map, onSuggestName]);
 
   return null;
 }
@@ -531,7 +600,8 @@ function SearchHereWatcher({ onUpdate }) {
 // ---- Floating UI elements ------------------------------------------------
 
 function NearbyModeIndicator() {
-  const { nearbyAnchor, exitNearbyMode } = useTrip();
+  const nearbyAnchor = useMapStore((s) => s.nearbyAnchor);
+  const exitNearbyMode = useMapStore((s) => s.exitNearbyMode);
   if (!nearbyAnchor) return null;
   return (
     <button

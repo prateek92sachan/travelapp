@@ -1,17 +1,18 @@
 import { useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useTrip } from '../hooks/useTrip';
+import { useWishlistStore, selectLists, selectActiveListId } from '../stores/wishlistStore';
 import { useAuth } from '../hooks/useAuth';
 import { SavedPlaceCard } from './WishlistPanel';
 
 export default function WishlistOverlay({ onClose }) {
-  const {
-    wishlistLists,
-    activeWishlist,
-    activeWishlistId,
-    selectWishlistById,
-    removePlaceFromWishlist,
-  } = useTrip();
+  const wishlistLists = useWishlistStore(selectLists);
+  const activeWishlistId = useWishlistStore(selectActiveListId);
+  const activeWishlist = useMemo(
+    () => wishlistLists.find((l) => l.id === activeWishlistId) || null,
+    [wishlistLists, activeWishlistId]
+  );
+  const selectList = useWishlistStore((s) => s.selectList);
+  const removePlace = useWishlistStore((s) => s.removePlace);
   const { user } = useAuth();
 
   const totalItems = useMemo(
@@ -41,7 +42,7 @@ export default function WishlistOverlay({ onClose }) {
                 key={list.id}
                 type="button"
                 className={`wishlist-list-tab ${list.id === activeWishlistId ? 'active' : ''}`}
-                onClick={() => selectWishlistById(list.id)}
+                onClick={() => selectList(list.id)}
               >
                 {list.name}
                 <span className="wishlist-list-count">{list.items.length}</span>
@@ -62,7 +63,7 @@ export default function WishlistOverlay({ onClose }) {
               <SavedPlaceCard
                 key={item.placeId}
                 item={item}
-                onRemove={() => removePlaceFromWishlist(item.placeId, activeWishlistId)}
+                onRemove={() => removePlace({ listId: activeWishlistId, placeId: item.placeId })}
               />
             ))
           )}

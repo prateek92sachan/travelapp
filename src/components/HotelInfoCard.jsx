@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { useTrip } from '../hooks/useTrip';
+import { useMapStore } from '../stores/mapStore';
+import { useTabQuery } from '../hooks/queries/useTabQuery';
 import { directionsUrl } from '../services/googleMaps';
 import { withinRadius } from '../utils/geo';
 import { formatCount } from '../utils/format';
@@ -12,35 +13,32 @@ const PROXIMITY_KM = 2;
  * Renders nothing when no hotel is selected.
  */
 export default function HotelInfoCard() {
-  const {
-    tabData,
-    selectedHotelId,
-    selectHotel,
-  } = useTrip();
+  const selectedHotelId = useMapStore((s) => s.selectedHotelId);
+  const selectHotel = useMapStore((s) => s.selectHotel);
+  const { data: hotels } = useTabQuery('hotels');
+  const { data: activities } = useTabQuery('activities');
+  const { data: restaurants } = useTabQuery('restaurants');
 
   const hotel = useMemo(
-    () => (tabData.hotels || []).find((h) => h.placeId === selectedHotelId),
-    [tabData.hotels, selectedHotelId]
+    () => (hotels || []).find((h) => h.placeId === selectedHotelId),
+    [hotels, selectedHotelId]
   );
 
   // Proximity counts pull from whatever tab data is currently loaded.
-  // Activities and restaurants are the most travel-relevant signals.
   // Distinguish "not loaded yet" (show —) from "loaded but zero" (show 0).
-  // tabData[key] is null until that tab first loads; an empty array means
-  // we asked Google and got nothing back.
   const counts = useMemo(() => {
     if (!hotel) return null;
     return {
       activities:
-        tabData.activities == null
+        activities == null
           ? null
-          : withinRadius(tabData.activities, hotel, PROXIMITY_KM).length,
+          : withinRadius(activities, hotel, PROXIMITY_KM).length,
       restaurants:
-        tabData.restaurants == null
+        restaurants == null
           ? null
-          : withinRadius(tabData.restaurants, hotel, PROXIMITY_KM).length
+          : withinRadius(restaurants, hotel, PROXIMITY_KM).length
     };
-  }, [hotel, tabData]);
+  }, [hotel, activities, restaurants]);
 
   if (!hotel) return null;
 

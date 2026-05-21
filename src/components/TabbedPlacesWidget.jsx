@@ -2,7 +2,12 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Compass, Utensils, Leaf, Gem, BedDouble, Heart, Navigation, Phone, Globe, Info, Pencil, Trash2 } from 'lucide-react';
 import Card from './Card';
-import { useTrip } from '../hooks/useTrip';
+import { useSearchStore } from '../stores/searchStore';
+import { useMapStore } from '../stores/mapStore';
+import { useWishlistStore, selectLists, selectActiveListId } from '../stores/wishlistStore';
+import { useTabQuery, TAB_KEYS } from '../hooks/queries/useTabQuery';
+import { useNearbyQuery } from '../hooks/queries/useNearbyQuery';
+import { useViewportQuery } from '../hooks/queries/useViewportQuery';
 import { directionsUrl, fetchPlaceDetails } from '../services/googleMaps';
 import { fetchWikiSummary } from '../services/wikipedia';
 import { fetchPlaceDescription } from '../services/gemini';
@@ -55,8 +60,6 @@ const PLACE_TABS = [
   { key: 'hotels',      label: 'Hotels',      Icon: BedDouble, color: '#0ea5e9' },
 ];
 
-export { PLACE_TABS };
-
 function InfoTooltip({ text }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -95,27 +98,70 @@ function InfoTooltip({ text }) {
 }
 
 function TabbedPlacesWidget({ expandable = true }) {
-  const {
-    activeTab,
-    switchTab,
-    activeTabItems,
-    activeTabLoading,
-    selectedPlaceId,
-    selectedPlace,
-    selectPlace,
-    wishlistLists,
-    activeWishlist,
-    activeWishlistId,
-    selectWishlistById,
-    renameWishlistById,
-    deleteWishlistById,
-    addPlaceToWishlist,
-    addPlaceToSmartWishlist,
-    removePlaceFromWishlist,
-    isWishlisted,
-    effectiveListId,
-    viewportCity,
-  } = useTrip();
+  // Search domain
+  const activeTab = useSearchStore((s) => s.activeTab);
+  const switchTab = useSearchStore((s) => s.switchTab);
+  const selectedPlaceId = useSearchStore((s) => s.selectedPlaceId);
+  const selectedPlace = useSearchStore((s) => s.selectedPlace);
+  const selectPlace = useSearchStore((s) => s.selectPlace);
+  const loading = useSearchStore((s) => s.loading);
+
+  // Map domain (mode overrides drive activeTabItems priority)
+  const nearbyAnchor = useMapStore((s) => s.nearbyAnchor);
+  const viewportTarget = useMapStore((s) => s.viewportTarget);
+  const viewportCity = useMapStore((s) => s.viewportCity);
+
+  // Wishlist domain
+  const wishlistLists = useWishlistStore(selectLists);
+  const activeWishlistId = useWishlistStore(selectActiveListId);
+  const activeWishlist = useMemo(
+    () => wishlistLists.find((l) => l.id === activeWishlistId) || null,
+    [wishlistLists, activeWishlistId]
+  );
+  const wAddPlace = useWishlistStore((s) => s.addPlace);
+  const wAddPlaceSmart = useWishlistStore((s) => s.addPlaceSmart);
+  const wRemovePlace = useWishlistStore((s) => s.removePlace);
+  const wSelectList = useWishlistStore((s) => s.selectList);
+  const wRenameList = useWishlistStore((s) => s.renameList);
+  const wDeleteList = useWishlistStore((s) => s.deleteList);
+  const wishlist = useWishlistStore((s) => s.wishlist);
+
+  // Derive active items per priority: nearby > viewport > city tab.
+  const tabQ = useTabQuery(activeTab);
+  const nearbyQ = useNearbyQuery({ anchor: nearbyAnchor, category: activeTab });
+  const vpQ = useViewportQuery({ target: viewportTarget, category: activeTab });
+  const activeTabItems = useMemo(() => {
+    if (!TAB_KEYS.includes(activeTab)) return [];
+    if (nearbyAnchor) return nearbyQ.data || [];
+    if (viewportTarget) return vpQ.data || [];
+    return tabQ.data || [];
+  }, [activeTab, nearbyAnchor, viewportTarget, tabQ.data, nearbyQ.data, vpQ.data]);
+  const activeTabLoading =
+    TAB_KEYS.includes(activeTab) &&
+    ((nearbyAnchor && nearbyQ.isFetching) ||
+      (viewportTarget && vpQ.isFetching) ||
+      tabQ.isFetching ||
+      loading);
+
+  // Adapter wrappers preserving the legacy useTrip() callback shapes.
+  const addPlaceToWishlist = (place, category, listId = activeWishlistId) =>
+    wAddPlace({ listId, place, category });
+  const addPlaceToSmartWishlist = (place, category) =>
+    wAddPlaceSmart({ place, category, viewportCity, fallbackListId: activeWishlistId });
+  const removePlaceFromWishlist = (placeId, listId = activeWishlistId) =>
+    wRemovePlace({ listId, placeId });
+  const selectWishlistById = (listId) => wSelectList(listId);
+  const renameWishlistById = (listId, name) => wRenameList({ listId, name });
+  const deleteWishlistById = (listId) => wDeleteList(listId);
+  const isWishlisted = (placeId, listId = activeWishlistId) =>
+    useWishlistStore.getState().isWishlisted(listId, placeId);
+  // Smart list resolution: viewport mode → city-named list; else → active list.
+  const effectiveListId = useMemo(() => {
+    if (!viewportCity) return activeWishlistId;
+    const norm = viewportCity.toLowerCase();
+    return wishlistLists.find((l) => l.destination?.toLowerCase() === norm)?.id || null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewportCity, wishlistLists, activeWishlistId, wishlist]);
 
   const saveListName = viewportCity
     ? shortListName(viewportCity)
@@ -263,7 +309,10 @@ function WishlistTab({
   onDelete,
   onRemove
 }) {
-  const { addPlaceToWishlist, activeWishlistId } = useTrip();
+  const wAddPlace = useWishlistStore((s) => s.addPlace);
+  const activeWishlistId = useWishlistStore(selectActiveListId);
+  const addPlaceToWishlist = (place, category, listId = activeWishlistId) =>
+    wAddPlace({ listId, place, category });
   const [pickerOpen, setPickerOpen] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [addForm, setAddForm] = useState(EMPTY_ADD_FORM);
@@ -637,7 +686,7 @@ const PlaceDetail = memo(function PlaceDetail({
   onSave,
   onRemove
 }) {
-  const { destination } = useTrip();
+  const destination = useSearchStore((s) => s.destination);
   const isManual = place.placeId?.startsWith('manual-');
 
   const [details, setDetails] = useState(null);

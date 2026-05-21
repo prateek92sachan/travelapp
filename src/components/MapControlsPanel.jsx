@@ -1,13 +1,11 @@
 import { useState } from 'react';
-import { useTrip } from '../hooks/useTrip';
+import { useMapStore } from '../stores/mapStore';
 
 export default function MapControlsPanel({ open: openProp, onToggle: onToggleProp }) {
-  const {
-    mapType,
-    setMapType,
-    transitOn,
-    setTransitOn,
-  } = useTrip();
+  const mapType = useMapStore((s) => s.mapType);
+  const setMapType = useMapStore((s) => s.setMapType);
+  const transitOn = useMapStore((s) => s.transitOn);
+  const setTransitOn = useMapStore((s) => s.setTransitOn);
 
   const [localOpen, setLocalOpen] = useState(false);
   const controlled = openProp !== undefined;

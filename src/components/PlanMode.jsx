@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { memo, useMemo, useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   BedDouble,
@@ -15,7 +15,11 @@ import {
   Gem,
   Trash2,
 } from 'lucide-react';
-import { useTrip } from '../hooks/useTrip';
+import { useSearchStore } from '../stores/searchStore';
+import { useMapStore } from '../stores/mapStore';
+import { useWishlistStore, selectActiveListId } from '../stores/wishlistStore';
+import { useTabQuery } from '../hooks/queries/useTabQuery';
+import { useViewportQuery } from '../hooks/queries/useViewportQuery';
 import {
   PHASES,
   PHASE_LABEL,
@@ -29,7 +33,6 @@ import {
   setPlaceSnapshot,
   durationMinutes,
   formatDuration,
-  isPlacePlanned,
 } from '../utils/plan';
 import { formatCount } from '../utils/format';
 
@@ -47,17 +50,72 @@ const PHASE_ICON = { morning: Sun, evening: Sunset, night: Moon };
 const PHASE_COLOR = { morning: '#f59e0b', evening: '#f97316', night: '#6366f1' };
 
 export default function PlanMode({ list }) {
-  const {
-    updateListPlan,
-    tabData,
-    tabLoading,
-    viewportItems,
-    fetchTabIfNeeded,
-    activeTab,
-    addPlaceToWishlist,
-    removePlaceFromWishlist,
-    isWishlisted,
-  } = useTrip();
+  const activeTab = useSearchStore((s) => s.activeTab);
+  const viewportTarget = useMapStore((s) => s.viewportTarget);
+  const wUpdatePlan = useWishlistStore((s) => s.updatePlan);
+  const wAddPlace = useWishlistStore((s) => s.addPlace);
+  const wRemovePlace = useWishlistStore((s) => s.removePlace);
+  const activeWishlistId = useWishlistStore(selectActiveListId);
+
+  // Tab data — one useTabQuery per category, assembled into the same shape
+  // PlanMode's existing memos expect.
+  const activitiesQ = useTabQuery('activities');
+  const restaurantsQ = useTabQuery('restaurants');
+  const natureQ = useTabQuery('nature');
+  const gemsQ = useTabQuery('gems');
+  const hotelsQ = useTabQuery('hotels');
+  const tabData = useMemo(
+    () => ({
+      activities: activitiesQ.data ?? null,
+      restaurants: restaurantsQ.data ?? null,
+      nature: natureQ.data ?? null,
+      gems: gemsQ.data ?? null,
+      hotels: hotelsQ.data ?? null
+    }),
+    [activitiesQ.data, restaurantsQ.data, natureQ.data, gemsQ.data, hotelsQ.data]
+  );
+  const tabLoading = useMemo(
+    () => ({
+      activities: activitiesQ.isFetching,
+      restaurants: restaurantsQ.isFetching,
+      nature: natureQ.isFetching,
+      gems: gemsQ.isFetching,
+      hotels: hotelsQ.isFetching
+    }),
+    [
+      activitiesQ.isFetching,
+      restaurantsQ.isFetching,
+      natureQ.isFetching,
+      gemsQ.isFetching,
+      hotelsQ.isFetching
+    ]
+  );
+  // Viewport overrides for pickers (when user has panned the map).
+  const vpActQ = useViewportQuery({ target: viewportTarget, category: 'activities' });
+  const vpRestQ = useViewportQuery({ target: viewportTarget, category: 'restaurants' });
+  const vpNatQ = useViewportQuery({ target: viewportTarget, category: 'nature' });
+  const vpGemsQ = useViewportQuery({ target: viewportTarget, category: 'gems' });
+  const vpHotelsQ = useViewportQuery({ target: viewportTarget, category: 'hotels' });
+  const viewportItems = useMemo(() => {
+    if (!viewportTarget) return null;
+    return {
+      activities: vpActQ.data ?? null,
+      restaurants: vpRestQ.data ?? null,
+      nature: vpNatQ.data ?? null,
+      gems: vpGemsQ.data ?? null,
+      hotels: vpHotelsQ.data ?? null
+    };
+  }, [viewportTarget, vpActQ.data, vpRestQ.data, vpNatQ.data, vpGemsQ.data, vpHotelsQ.data]);
+
+  // Adapter wrappers preserving the legacy callback shapes.
+  const updateListPlan = (listId, p) => wUpdatePlan({ listId, plan: p });
+  const addPlaceToWishlist = (place, category, listId = activeWishlistId) =>
+    wAddPlace({ listId, place, category });
+  const removePlaceFromWishlist = (placeId, listId = activeWishlistId) =>
+    wRemovePlace({ listId, placeId });
+  const isWishlisted = (placeId, listId = activeWishlistId) =>
+    useWishlistStore.getState().isWishlisted(listId, placeId);
+  const fetchTabIfNeeded = () => {}; // queries auto-fetch; noop for compat
   const plan = useMemo(() => ensurePlan(list?.plan), [list?.plan]);
 
   const items = list?.items || [];
@@ -67,6 +125,18 @@ export default function PlanMode({ list }) {
     for (const it of items) map[it.placeId] = it;
     return map;
   }, [items, plan.placeSnapshots]);
+
+  // Precomputed set of placeIds present in the plan. O(1) lookup per row in
+  // the picker instead of an O(days × phases × sessions) scan via isPlacePlanned().
+  const plannedSet = useMemo(() => {
+    const s = new Set();
+    for (const day of plan.itinerary) {
+      for (const phase of PHASES) {
+        for (const sess of day.phases[phase]) s.add(sess.placeId);
+      }
+    }
+    return s;
+  }, [plan]);
 
   // Live data sources for the pickers — viewport takes precedence over city tabData.
   const liveDataByCategory = useMemo(() => {
@@ -183,7 +253,7 @@ export default function PlanMode({ list }) {
 
       {picker && createPortal(
         <PlacePickerModal
-          plan={plan}
+          plannedSet={plannedSet}
           tabs={SESSION_TABS}
           initialTab={initialSessionPill}
           liveDataByCategory={liveDataByCategory}
@@ -410,7 +480,7 @@ function SessionCard({ session, place, onChange, onRemove }) {
   );
 }
 
-function LightPickerRow({ place, category, planned, selected, saved, onToggleSave, onPick, showCategoryChip }) {
+const LightPickerRow = memo(function LightPickerRow({ place, category, planned, selected, saved, onToggleSave, onPick, showCategoryChip }) {
   const tab = TAB_BY_KEY[category];
   const description = place.wiki?.extract || place.summary;
   const truncatedDesc = description?.length > 110
@@ -479,10 +549,17 @@ function LightPickerRow({ place, category, planned, selected, saved, onToggleSav
       </button>
     </div>
   );
-}
+}, (prev, next) =>
+  prev.place === next.place &&
+  prev.category === next.category &&
+  prev.planned === next.planned &&
+  prev.selected === next.selected &&
+  prev.saved === next.saved &&
+  prev.showCategoryChip === next.showCategoryChip
+);
 
-function PlacePickerModal({
-  plan,
+function PlacePickerModalImpl({
+  plannedSet,
   tabs,
   initialTab,
   liveDataByCategory,
@@ -563,21 +640,18 @@ function PlacePickerModal({
               {(data || []).length === 0 ? 'Nothing in this category yet.' : 'No matches.'}
             </div>
           ) : (
-            filtered.map((p) => {
-              const planned = isPlacePlanned(plan, p.placeId);
-              return (
-                <LightPickerRow
-                  key={p.placeId}
-                  place={p}
-                  category={activePill}
-                  planned={planned}
-                  saved={isSavedFn(p.placeId)}
-                  onToggleSave={() => onToggleSave(p, activePill)}
-                  onPick={() => onPick({ place: p, category: activePill })}
-                  showCategoryChip
-                />
-              );
-            })
+            filtered.map((p) => (
+              <LightPickerRow
+                key={p.placeId}
+                place={p}
+                category={activePill}
+                planned={plannedSet.has(p.placeId)}
+                saved={isSavedFn(p.placeId)}
+                onToggleSave={() => onToggleSave(p, activePill)}
+                onPick={() => onPick({ place: p, category: activePill })}
+                showCategoryChip
+              />
+            ))
           )}
         </div>
       </div>
@@ -585,7 +659,17 @@ function PlacePickerModal({
   );
 }
 
-function HotelPickerModal({
+const PlacePickerModal = memo(PlacePickerModalImpl, (p, n) =>
+  p.plannedSet === n.plannedSet &&
+  p.tabs === n.tabs &&
+  p.initialTab === n.initialTab &&
+  p.liveDataByCategory === n.liveDataByCategory &&
+  p.tabLoading === n.tabLoading &&
+  p.isSavedFn === n.isSavedFn &&
+  p.title === n.title
+);
+
+function HotelPickerModalImpl({
   plan,
   hotels,
   hotelsLoading,
@@ -661,6 +745,14 @@ function HotelPickerModal({
     </div>
   );
 }
+
+const HotelPickerModal = memo(HotelPickerModalImpl, (p, n) =>
+  p.hotels === n.hotels &&
+  p.hotelsLoading === n.hotelsLoading &&
+  p.currentDayHotels === n.currentDayHotels &&
+  p.isSavedFn === n.isSavedFn &&
+  p.title === n.title
+);
 
 function totalExpenseLabel(plan) {
   let sum = 0;
