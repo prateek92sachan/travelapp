@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useSearchStore } from '../../stores/searchStore';
+import { useMapStore } from '../../stores/mapStore';
 import { queryClient } from '../../lib/queryClient';
 import {
   fetchTopActivities,
@@ -47,20 +48,34 @@ export function buildTabQueryFn({ tabKey, destination, lat, lng, radiusMeters })
   };
 }
 
+// Tab query gating (Fix 3): fetches only when the tab is "demanded" by either
+// (a) the active drawer tab, (b) the map category toggle being ON, or
+// (c) cache already has data (we still want refetch/refresh behavior).
+// This replaces the prior always-on prefetch of all 5 tabs that fired on
+// every search.
 export function useTabQuery(tabKey) {
   const destination = useSearchStore((s) => s.destination);
   const coords = useSearchStore((s) => s.coords);
   const radiusMeters = useSearchStore((s) => s.searchRadiusMeters);
+  const activeTab = useSearchStore((s) => s.activeTab);
+  const visible = useMapStore((s) => s.visibleCategories?.[tabKey]);
   const lat = coords?.lat;
   const lng = coords?.lng;
+  const queryKey = tabQueryKey({ tabKey, destination, lat, lng, radiusMeters });
+  const alreadyCached = !!queryClient.getQueryData(queryKey);
+  const demanded = activeTab === tabKey || !!visible || alreadyCached;
   const enabled =
+    demanded &&
     !!destination &&
     Number.isFinite(lat) &&
     Number.isFinite(lng) &&
     TAB_KEYS.includes(tabKey);
   return useQuery({
-    queryKey: tabQueryKey({ tabKey, destination, lat, lng, radiusMeters }),
+    queryKey,
     queryFn: buildTabQueryFn({ tabKey, destination, lat, lng, radiusMeters }),
-    enabled
+    enabled,
+    // Once fetched, keep the data forever within the session — the cost
+    // savings come from never re-fetching a tab the user already opened.
+    staleTime: Infinity
   });
 }

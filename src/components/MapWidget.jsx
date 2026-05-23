@@ -33,19 +33,13 @@ export default function MapWidget() {
   const coords = useSearchStore((s) => s.coords);
   const loading = useSearchStore((s) => s.loading);
   const mapType = useMapStore((s) => s.mapType);
+  // visibleCategories moved to mapStore (Fix 3) — also drives useTabQuery
+  // gating, so the same toggle controls both marker visibility and data fetch.
+  const visibleCategories = useMapStore((s) => s.visibleCategories);
+  const toggleCategory = useMapStore((s) => s.toggleCategory);
 
-  const [visibleCategories, setVisibleCategories] = useState({
-    activities: true,
-    restaurants: true,
-    nature: true,
-    gems: true,
-    hotels: true
-  });
   const [controlsOpen, setControlsOpen] = useState(false);
 
-  const toggleCategory = useCallback((cat) => {
-    setVisibleCategories((prev) => ({ ...prev, [cat]: !prev[cat] }));
-  }, []);
   const toggleControls = useCallback(() => setControlsOpen((o) => !o), []);
 
   useEffect(() => {

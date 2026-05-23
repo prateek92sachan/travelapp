@@ -35,9 +35,12 @@ Pricing reference (Places API New, 2024–2025):
 
 ### Phase C — lazy tabs (higher-risk, UX change)
 
-- [ ] Fix 3: only fetch `activities` in Phase 1 of `search()`. Restaurants/nature/gems/hotels become lazy via `useTabQuery` `enabled: tabKey === activeTab || prefetched`. Removes Phase 2 background fetch. Cuts initial-search cost ~80% (5 → 1).
-  - Regression risk: tab-switch latency goes from instant (pre-fetched) to ~1.5s API call.
-  - Mitigation: keep `staleTime: Infinity` so a tab fetched once is permanent within session.
+- [x] Fix 3: tab/viewport/nearby queries now gated on `visibleCategories[cat]` (moved from MapWidget local state to `mapStore`) OR `activeTab === cat` OR already-cached. Default visibility: `activities + restaurants` ON, others OFF. User opts in via the map controls panel.
+  - Initial search cost: 2 Places Text Search calls instead of 5 (~60% savings).
+  - Viewport pan cost: 2 calls instead of 5.
+  - `staleTime: Infinity` on all three query hooks so a fetched tab/viewport/nearby stays warm for the session.
+  - Phase 2 background tab prefetch removed from `useTrip.search()`. Only events + last-year weather still prefetch.
+  - Map markers regression: nature/gems/hotels markers no longer appear until user toggles category ON. Acceptable per design call.
 
 ## Out of scope (logged for later)
 

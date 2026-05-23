@@ -402,8 +402,11 @@ export function TripProvider({ children }) {
           weather: w,
         });
 
-        // Phase 2: background — remaining tabs + last-year weather + events.
-        const otherTabs = ['restaurants', 'nature', 'gems', 'hotels'];
+        // Phase 2: background — last-year weather + events only.
+        // Tab prefetch removed (Fix 3): restaurants/nature/gems/hotels now
+        // lazy-fetch via useTabQuery when the user opens the tab or toggles
+        // the map category visible. Each suppressed prefetch saves one
+        // Places Text Search call (~₹3) per search.
         Promise.allSettled([
           queryClient.fetchQuery({
             queryKey: lastYearWeatherKey(weatherTarget),
@@ -414,28 +417,8 @@ export function TripProvider({ children }) {
             queryKey: eventsKey({ destination: dest, dateISO: dt }),
             queryFn: () => fetchAnnualEvents(dest, dt),
             staleTime: 0
-          }),
-          ...otherTabs.map((tabKey) =>
-            queryClient.fetchQuery({
-              queryKey: tabQueryKey({ tabKey, destination: dest, lat: geo.lat, lng: geo.lng, radiusMeters: radius }),
-              queryFn: buildTabQueryFn({ tabKey, destination: dest, lat: geo.lat, lng: geo.lng, radiusMeters: radius }),
-              staleTime: 0
-            })
-          )
-        ]).then(([_lywRes, _evRes, ...tabRes]) => {
-          if (myReq !== requestSeq.current) return;
-          const persistedTabs = { activities: acts };
-          otherTabs.forEach((tabKey, i) => {
-            const r = tabRes[i];
-            persistedTabs[tabKey] = r.status === 'fulfilled' ? r.value ?? null : null;
-          });
-          const cachedWeather = queryClient.getQueryData(weatherKey(weatherTarget));
-          setCachedPlaces(dest, dt, {
-            coords: geo,
-            tabData: persistedTabs,
-            weather: cachedWeather,
-          });
-        }).catch((err) => console.warn('Phase 2 error:', err));
+          })
+        ]).catch((err) => console.warn('Phase 2 error:', err));
       } catch (e) {
         if (myReq !== requestSeq.current) return;
         console.error(e);

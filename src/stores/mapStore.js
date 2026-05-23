@@ -5,6 +5,18 @@ export const useMapStore = create((set, get) => ({
   mapType: 'roadmap',
   transitOn: false,
 
+  // Category visibility — drives both map markers AND tab/viewport prefetch
+  // gating. Default: activities + restaurants ON so initial search only fires
+  // 2 Places Text Search calls instead of 5. User opts in to the rest via the
+  // map controls panel. See milestone Fix 3.
+  visibleCategories: {
+    activities: true,
+    restaurants: true,
+    nature: false,
+    gems: false,
+    hotels: false
+  },
+
   // Map-mode state (where the map is "focused")
   selectedHotelId: null, // null = no proximity ring
   nearbyAnchor: null, // hotel that anchors nearby-mode; null = off
@@ -15,6 +27,10 @@ export const useMapStore = create((set, get) => ({
   setTransitOn: (transitOn) =>
     set((s) => ({
       transitOn: typeof transitOn === 'function' ? transitOn(s.transitOn) : transitOn
+    })),
+  toggleCategory: (cat) =>
+    set((s) => ({
+      visibleCategories: { ...s.visibleCategories, [cat]: !s.visibleCategories[cat] }
     })),
 
   setSelectedHotelId: (v) => set({ selectedHotelId: v }),
