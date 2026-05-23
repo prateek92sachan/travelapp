@@ -30,8 +30,8 @@ Pricing reference (Places API New, 2024–2025):
 
 ### Phase B — watcher + cache (medium-risk)
 
-- [ ] Fix 1: debounce `SearchHereWatcher` (600ms + 0.5km min-move guard, mirror `ViewportWatcher`). Currently fires on every idle event including micro-settles.
-- [ ] Fix 5: quantized-coord LRU cache + TTL for reverse-geocode helpers (`reverseGeocodeCity`, `reverseGeocodePlaceName`). Same coords within session = single API call.
+- [x] Fix 1: debounce `SearchHereWatcher` (600ms + 0.5km min-move guard, mirror `ViewportWatcher`). Currently fires on every idle event including micro-settles.
+- [x] Fix 5: quantized-coord LRU cache + TTL for reverse-geocode helpers (`reverseGeocodeCity`, `reverseGeocodePlaceName`). Same coords within session = single API call. Bucket ≈110m, TTL 30min, max 200 entries.
 
 ### Phase C — lazy tabs (higher-risk, UX change)
 

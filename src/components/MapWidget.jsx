@@ -555,13 +555,18 @@ function SearchHereWatcher({ skip }) {
   const firstIdleSkippedRef = useRef(false);
   const requestSeqRef = useRef(0);
   const skipRef = useRef(skip);
+  // Mirrors ViewportWatcher's debounce + min-move guard so the reverse-geocode
+  // pair fires once per real pan instead of on every idle settle. See
+  // milestone Fix 1.
+  const debounceRef = useRef(null);
+  const lastResolvedRef = useRef(null);
   const setPlaceDisplay = useSearchStore((s) => s.setPlaceDisplay);
   useEffect(() => { skipRef.current = skip; }, [skip]);
 
   useEffect(() => {
     if (!map) return undefined;
 
-    const handleIdle = async () => {
+    const handleIdle = () => {
       if (!firstIdleSkippedRef.current) {
         firstIdleSkippedRef.current = true;
         return;
@@ -570,40 +575,50 @@ function SearchHereWatcher({ skip }) {
 
       const c = map.getCenter();
       if (!c) return;
-      const lat = c.lat();
-      const lng = c.lng();
+      const next = { lat: c.lat(), lng: c.lng() };
 
-      const seq = ++requestSeqRef.current;
-      // reverseGeocodeCity uses Geocoding API (~$5/1000) instead of the
-      // Places Text Search "city" probe (~$32/1000). See milestone Fix 2.
-      const [name, locality] = await Promise.all([
-        reverseGeocodePlaceName({ lat, lng }).catch(() => null),
-        reverseGeocodeCity({ lat, lng }).catch(() => null)
-      ]);
-      if (seq !== requestSeqRef.current) return;
-      if (!name && !locality) return;
+      const last = lastResolvedRef.current;
+      if (last && haversineKm(last, next) < VIEWPORT_MIN_MOVE_KM) return;
 
-      let area = name || locality || '';
-      let city = '';
-      if (name) {
-        const parts = name.split(',').map((s) => s.trim()).filter(Boolean);
-        if (parts.length >= 2) {
-          area = parts[0];
-          city = parts[1];
-        } else if (parts.length === 1) {
-          area = parts[0];
-          if (locality && locality.toLowerCase() !== parts[0].toLowerCase()) {
-            city = locality;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(async () => {
+        if (skipRef.current) return;
+        lastResolvedRef.current = next;
+        const { lat, lng } = next;
+
+        const seq = ++requestSeqRef.current;
+        // reverseGeocodeCity uses Geocoding API (~$5/1000) instead of the
+        // Places Text Search "city" probe (~$32/1000). See milestone Fix 2.
+        const [name, locality] = await Promise.all([
+          reverseGeocodePlaceName({ lat, lng }).catch(() => null),
+          reverseGeocodeCity({ lat, lng }).catch(() => null)
+        ]);
+        if (seq !== requestSeqRef.current) return;
+        if (!name && !locality) return;
+
+        let area = name || locality || '';
+        let city = '';
+        if (name) {
+          const parts = name.split(',').map((s) => s.trim()).filter(Boolean);
+          if (parts.length >= 2) {
+            area = parts[0];
+            city = parts[1];
+          } else if (parts.length === 1) {
+            area = parts[0];
+            if (locality && locality.toLowerCase() !== parts[0].toLowerCase()) {
+              city = locality;
+            }
           }
         }
-      }
-      setPlaceDisplay({ area, city });
+        setPlaceDisplay({ area, city });
+      }, VIEWPORT_DEBOUNCE_MS);
     };
 
     const listener = map.addListener('idle', handleIdle);
     return () => {
       if (listener?.remove) listener.remove();
       else if (window.google?.maps?.event) window.google.maps.event.removeListener(listener);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [map, setPlaceDisplay]);
 
