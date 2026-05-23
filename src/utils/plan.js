@@ -201,3 +201,25 @@ export function isPlacePlanned(plan, placeId) {
   }
   return false;
 }
+
+// Count of distinct places actually placed in the plan — used by the list
+// chip in Plan mode. Counts unique placeIds across sessions and hotels.
+export function countPlannedPlaces(plan) {
+  if (!plan || !Array.isArray(plan.itinerary)) return 0;
+  const seen = new Set();
+  for (const day of plan.itinerary) {
+    for (const phase of PHASES) {
+      const sessions = day?.phases?.[phase];
+      if (!Array.isArray(sessions)) continue;
+      for (const s of sessions) {
+        if (s?.placeId) seen.add(s.placeId);
+      }
+    }
+    if (Array.isArray(day?.hotels)) {
+      for (const id of day.hotels) {
+        if (id) seen.add(id);
+      }
+    }
+  }
+  return seen.size;
+}

@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Compass, Utensils, Leaf, Gem, BedDouble, Heart, Navigation, Phone, Globe, Info, Pencil, Trash2 } from 'lucide-react';
+import { Compass, Utensils, Leaf, Gem, BedDouble, Heart, Navigation, Phone, Globe, Pencil, Trash2 } from 'lucide-react';
 import Card from './Card';
 import { useSearchStore } from '../stores/searchStore';
 import { useMapStore } from '../stores/mapStore';
@@ -15,6 +15,7 @@ import { SavedPlaceCard } from './WishlistPanel';
 import PlanMode from './PlanMode';
 import { formatCount } from '../utils/format';
 import { shortenAddress } from '../utils/shortenAddress';
+import { countPlannedPlaces } from '../utils/plan';
 
 const shortListName = shortenAddress;
 
@@ -43,7 +44,7 @@ const TabNav = memo(function TabNav({ activeTab, tabs, onSwitch }) {
             title={t.label}
             onClick={() => onSwitch(t.key)}
           >
-            <t.Icon size={14} strokeWidth={2} aria-hidden color={t.color} />
+            <t.Icon size={19} strokeWidth={2} aria-hidden color={t.color} />
             {isActive && <span>{t.label}</span>}
           </button>
         );
@@ -59,43 +60,6 @@ const PLACE_TABS = [
   { key: 'gems',        label: 'Hidden gems', Icon: Gem,       color: '#6366f1' },
   { key: 'hotels',      label: 'Hotels',      Icon: BedDouble, color: '#0ea5e9' },
 ];
-
-function InfoTooltip({ text }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDown(e) {
-      if (!ref.current?.contains(e.target)) setOpen(false);
-    }
-    document.addEventListener('pointerdown', onDown, true);
-    return () => document.removeEventListener('pointerdown', onDown, true);
-  }, [open]);
-
-  return (
-    <span
-      ref={ref}
-      className={`info-tooltip ${open ? 'open' : ''}`}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
-      <button
-        type="button"
-        className="info-tooltip-btn"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        aria-label="More info"
-        aria-expanded={open}
-      >
-        <Info size={14} strokeWidth={2} aria-hidden />
-      </button>
-      <span className="info-tooltip-bubble" role="tooltip">{text}</span>
-    </span>
-  );
-}
 
 function TabbedPlacesWidget({ expandable = true }) {
   // Search domain
@@ -173,6 +137,15 @@ function TabbedPlacesWidget({ expandable = true }) {
   const isWishlistTab = activeTab === 'wishlist';
   const savedCount = activeWishlist?.items?.length || 0;
 
+  // Lifted from WishlistTab so head (workspace + city tabs) can render as
+  // sticky topBands above stickyNav while body stays in card-body.
+  const wishlistState = useWishlistTabState({
+    activeList: activeWishlist,
+    onRename: renameWishlistById,
+    onDelete: deleteWishlistById,
+    onSelect: selectWishlistById,
+  });
+
   // Refs so the re-anchor effect can read current values without them being deps.
   const selectedPlaceIdRef = useRef(selectedPlaceId);
   const selectedPlaceRef = useRef(selectedPlace);
@@ -206,11 +179,41 @@ function TabbedPlacesWidget({ expandable = true }) {
     return () => cancelAnimationFrame(raf);
   }, [activeTabItems]);
 
+  const wishlistTopBands = isWishlistTab
+    ? [
+        ...(activeWishlist
+          ? [
+              <WishlistListPicker
+                key="picker"
+                lists={wishlistLists}
+                activeListId={activeWishlistId}
+                mode={wishlistState.mode}
+                editingName={wishlistState.editingName}
+                editValue={wishlistState.editValue}
+                editInputRef={wishlistState.editInputRef}
+                setEditValue={wishlistState.setEditValue}
+                setEditingName={wishlistState.setEditingName}
+                onChipPointerDown={wishlistState.handleChipPointerDown}
+                onChipPointerUp={wishlistState.handleChipPointerUp}
+                onChipClick={wishlistState.handleChipClick}
+                onCommitRename={wishlistState.commitRename}
+                onCancelRename={wishlistState.cancelRename}
+                onConfirmDelete={wishlistState.confirmDelete}
+              />,
+            ]
+          : []),
+        <WishlistHead
+          key="head"
+          activeList={activeWishlist}
+          mode={wishlistState.mode}
+          setMode={wishlistState.setMode}
+        />,
+      ]
+    : null;
+
   return (
     <>
       <Card
-        icon="📍"
-        title="What to do here"
         expandable={expandable}
         extraHeader={
           <div className="wishlist-header-controls">
@@ -227,7 +230,7 @@ function TabbedPlacesWidget({ expandable = true }) {
               aria-label="My wishlist"
             >
               <Heart
-                size={16}
+                size={21}
                 strokeWidth={2}
                 aria-hidden
                 fill={isWishlistTab ? 'currentColor' : 'none'}
@@ -236,20 +239,27 @@ function TabbedPlacesWidget({ expandable = true }) {
             </button>
           </div>
         }
-        stickyNav={
+        middleHeader={
           <TabNav activeTab={activeTab} tabs={PLACE_TABS} onSwitch={switchTab} />
         }
+        topBands={wishlistTopBands}
       >
         <div className="tab-panel" role="tabpanel">
           {isWishlistTab ? (
-            <WishlistTab
+            <WishlistBody
               lists={wishlistLists}
               activeList={activeWishlist}
               activeListId={activeWishlistId}
-              onSelect={selectWishlistById}
-              onRename={renameWishlistById}
-              onDelete={deleteWishlistById}
               onRemove={removePlaceFromWishlist}
+              mode={wishlistState.mode}
+              pickerOpen={wishlistState.pickerOpen}
+              setPickerOpen={wishlistState.setPickerOpen}
+              showAddForm={wishlistState.showAddForm}
+              setShowAddForm={wishlistState.setShowAddForm}
+              addForm={wishlistState.addForm}
+              setAddForm={wishlistState.setAddForm}
+              addFormRef={wishlistState.addFormRef}
+              onSelect={selectWishlistById}
             />
           ) : activeTabLoading && activeTabItems.length === 0 ? (
             <Skeleton />
@@ -300,23 +310,11 @@ const CATEGORY_OPTIONS = [
 
 const EMPTY_ADD_FORM = { name: '', location: '', category: 'activities', duration: '', cost: '' };
 
-function WishlistTab({
-  lists,
-  activeList,
-  activeListId,
-  onSelect,
-  onRename,
-  onDelete,
-  onRemove
-}) {
-  const wAddPlace = useWishlistStore((s) => s.addPlace);
-  const activeWishlistId = useWishlistStore(selectActiveListId);
-  const addPlaceToWishlist = (place, category, listId = activeWishlistId) =>
-    wAddPlace({ listId, place, category });
+function useWishlistTabState({ activeList, onRename, onDelete, onSelect }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [addForm, setAddForm] = useState(EMPTY_ADD_FORM);
-  const [mode, setMode] = useState('saved'); // 'saved' | 'plan'
+  const [mode, setMode] = useState('plan'); // 'saved' | 'plan'
   const [editingName, setEditingName] = useState(false);
   const [editValue, setEditValue] = useState(activeList?.name || '');
 
@@ -377,6 +375,158 @@ function WishlistTab({
     if (!didLongPress.current) onSelect(listId);
   }
 
+  return {
+    pickerOpen, setPickerOpen,
+    showAddForm, setShowAddForm,
+    addForm, setAddForm,
+    mode, setMode,
+    editingName, setEditingName,
+    editValue, setEditValue,
+    addFormRef, editInputRef,
+    commitRename, cancelRename, confirmDelete,
+    handleChipPointerDown, handleChipPointerUp, handleChipClick,
+  };
+}
+
+function WishlistHead({ activeList, mode, setMode }) {
+  if (!activeList) return null;
+  return (
+    <div className="wishlist-mode-tabs" role="tablist" aria-label="View mode">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === 'plan'}
+        className={`wishlist-mode-tab ${mode === 'plan' ? 'active' : ''}`}
+        onClick={() => setMode('plan')}
+      >
+        Plan
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === 'saved'}
+        className={`wishlist-mode-tab ${mode === 'saved' ? 'active' : ''}`}
+        onClick={() => setMode('saved')}
+      >
+        Saved
+      </button>
+    </div>
+  );
+}
+
+function WishlistListPicker({
+  lists,
+  activeListId,
+  mode,
+  editingName,
+  editValue,
+  editInputRef,
+  setEditValue,
+  setEditingName,
+  onChipPointerDown,
+  onChipPointerUp,
+  onChipClick,
+  onCommitRename,
+  onCancelRename,
+  onConfirmDelete,
+}) {
+  if (lists.length === 0) return null;
+  return (
+    <div className="wishlist-list-picker" role="tablist" aria-label="Wishlist lists">
+      {lists.map((list) => {
+        const isActive = activeListId === list.id;
+        return (
+          <div
+            key={list.id}
+            role="tab"
+            tabIndex={0}
+            aria-selected={isActive}
+            className={`wishlist-list-chip ${isActive ? 'active' : ''}`}
+            onPointerDown={onChipPointerDown}
+            onPointerUp={onChipPointerUp}
+            onPointerLeave={onChipPointerUp}
+            onContextMenu={(e) => e.preventDefault()}
+            onClick={() => onChipClick(list.id)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onChipClick(list.id);
+              }
+            }}
+          >
+            {isActive && editingName ? (
+              <input
+                ref={editInputRef}
+                className="wishlist-list-chip-input"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onBlur={onCommitRename}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); onCommitRename(); }
+                  else if (e.key === 'Escape') { e.preventDefault(); onCancelRename(); }
+                }}
+                aria-label="List name"
+              />
+            ) : (
+              <>
+                <span>{shortListName(list.name)}</span>
+                <span>
+                  {mode === 'plan'
+                    ? countPlannedPlaces(list.plan)
+                    : list.items.length}
+                </span>
+                {isActive && !editingName && (
+                  <span className="wishlist-list-chip-actions">
+                    <button
+                      type="button"
+                      className="wishlist-chip-action"
+                      onClick={(e) => { e.stopPropagation(); setEditingName(true); }}
+                      aria-label="Rename list"
+                      title="Rename list"
+                    >
+                      <Pencil size={12} strokeWidth={1.75} aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      className="wishlist-chip-action"
+                      onClick={(e) => { e.stopPropagation(); onConfirmDelete(); }}
+                      aria-label="Delete list"
+                      title="Delete list"
+                    >
+                      <Trash2 size={12} strokeWidth={1.75} aria-hidden />
+                    </button>
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function WishlistBody({
+  lists,
+  activeList,
+  activeListId,
+  onRemove,
+  mode,
+  pickerOpen,
+  setPickerOpen,
+  showAddForm,
+  setShowAddForm,
+  addForm,
+  setAddForm,
+  addFormRef,
+  onSelect,
+}) {
+  const wAddPlace = useWishlistStore((s) => s.addPlace);
+  const activeWishlistId = useWishlistStore(selectActiveListId);
+  const addPlaceToWishlist = (place, category, listId = activeWishlistId) =>
+    wAddPlace({ listId, place, category });
+
   function handleAddSubmit(e) {
     e.preventDefault();
     if (!addForm.name.trim() || !activeWishlistId) return;
@@ -394,57 +544,6 @@ function WishlistTab({
 
   return (
     <div className="wishlist-workspace">
-      <div className="wishlist-workspace-head">
-        <div className="wishlist-workspace-title-row">
-          <div className="wishlist-workspace-title">Wishlist workspace</div>
-          <InfoTooltip
-            text="Tap a list to switch. Hold to see all. Save cards from Activities, Restaurants, Nature, Hidden gems, or Hotels — or add places manually."
-          />
-        </div>
-        {activeList && (
-          <div className="wishlist-mode-toggle" role="tablist" aria-label="View mode">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === 'saved'}
-              className={`wishlist-mode-btn ${mode === 'saved' ? 'active' : ''}`}
-              onClick={() => setMode('saved')}
-            >
-              Saved
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === 'plan'}
-              className={`wishlist-mode-btn ${mode === 'plan' ? 'active' : ''}`}
-              onClick={() => setMode('plan')}
-            >
-              Plan
-            </button>
-          </div>
-        )}
-      </div>
-
-      {lists.length > 1 && (
-        <div className="wishlist-list-picker" aria-label="Wishlist lists">
-          {lists.map((list) => (
-            <button
-              key={list.id}
-              type="button"
-              className={`wishlist-list-chip ${activeListId === list.id ? 'active' : ''}`}
-              onPointerDown={handleChipPointerDown}
-              onPointerUp={handleChipPointerUp}
-              onPointerLeave={handleChipPointerUp}
-              onContextMenu={(e) => e.preventDefault()}
-              onClick={() => handleChipClick(list.id)}
-            >
-              <span>{shortListName(list.name)}</span>
-              <span>{list.items.length}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
       {pickerOpen && (
         <div className="wishlist-picker-overlay">
           <div className="wishlist-picker-backdrop" onClick={() => setPickerOpen(false)} />
@@ -471,42 +570,6 @@ function WishlistTab({
         </div>
       ) : (
         <div className="wishlist-active-panel">
-          <div className="wishlist-active-head">
-            {editingName ? (
-              <input
-                ref={editInputRef}
-                className="wishlist-active-title-input"
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onBlur={commitRename}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
-                  else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
-                }}
-                aria-label="List name"
-              />
-            ) : (
-              <button
-                type="button"
-                className="wishlist-active-title-btn"
-                onClick={() => setEditingName(true)}
-                title="Rename list"
-              >
-                <span className="wishlist-active-title">{shortListName(activeList.name)}</span>
-                <Pencil size={13} strokeWidth={1.75} aria-hidden className="wishlist-active-edit-icon" />
-              </button>
-            )}
-            <button
-              type="button"
-              className="wishlist-delete-icon-btn"
-              onClick={confirmDelete}
-              aria-label="Delete list"
-              title="Delete list"
-            >
-              <Trash2 size={15} strokeWidth={1.75} aria-hidden />
-            </button>
-          </div>
-
           {mode === 'plan' ? (
             <PlanMode list={activeList} />
           ) : activeList.items.length === 0 ? (
@@ -526,13 +589,13 @@ function WishlistTab({
           )}
 
           {mode === 'saved' && (
-          <button
-            type="button"
-            className={`wishlist-add-trigger ${showAddForm ? 'open' : ''}`}
-            onClick={() => setShowAddForm((v) => !v)}
-          >
-            {showAddForm ? '✕' : '+ Add'}
-          </button>
+            <button
+              type="button"
+              className={`wishlist-add-trigger ${showAddForm ? 'open' : ''}`}
+              onClick={() => setShowAddForm((v) => !v)}
+            >
+              {showAddForm ? '✕' : '+ Add'}
+            </button>
           )}
 
           {mode === 'saved' && showAddForm && (
