@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Compass, Utensils, Leaf, Gem, BedDouble, Settings } from 'lucide-react';
 import { Map, AdvancedMarker, useMap } from '@vis.gl/react-google-maps';
 import { GOOGLE_MAPS_MAP_ID } from '../services/config';
-import { reverseGeocodePlaceName } from '../services/googleMaps';
+import { reverseGeocodePlaceName, reverseGeocodeCity } from '../services/googleMaps';
 import Card from './Card';
 import { useTrip } from '../hooks/useTrip';
 import { useSearchStore } from '../stores/searchStore';
@@ -85,7 +85,6 @@ function MapInner({ center, mapType, visibleCategories, toggleCategory, controls
   // tab switching + UI state + map pan event; clearViewportItems dispatches
   // a pan-to-city event; search() drives the full orchestration flow.
   const { selectPlace, clearViewportItems, search } = useTrip();
-  const setDestination = useSearchStore((s) => s.setDestination);
   const loading = useSearchStore((s) => s.loading);
   const selectedPlaceId = useSearchStore((s) => s.selectedPlaceId);
   const nearbyAnchor = useMapStore((s) => s.nearbyAnchor);
@@ -138,11 +137,15 @@ function MapInner({ center, mapType, visibleCategories, toggleCategory, controls
     };
   }, [viewportTarget, vpAct, vpRest, vpNat, vpGems, vpHotels]);
 
-  // Click "Search here" → commits whatever text is currently in the destination
-  // input (auto-updated by SearchHereWatcher on each idle) as a fresh full
-  // search: new geocode + Phase 1/2 fetch. Replaces tabs + map center.
+  // Click "Search here" → search the current map-center location (resolved
+  // into placeArea/placeCity by SearchHereWatcher). Falls back to the current
+  // destination input if no resolved name yet.
   const handleSearchHereClick = useCallback(() => {
-    search();
+    const { placeArea, placeCity, destination } = useSearchStore.getState();
+    const parts = [placeArea, placeCity].filter(Boolean);
+    const override = parts.length ? parts.join(', ') : destination;
+    if (!override) return;
+    search({ destination: override });
   }, [search]);
 
   // Buttons disabled while a full search is in-flight or nearby mode is active.
@@ -211,10 +214,7 @@ function MapInner({ center, mapType, visibleCategories, toggleCategory, controls
         <FocusListener />
         <TransitLayer />
         <ProximityRing center={anchorHotel} radiusKm={PROXIMITY_KM} />
-        <SearchHereWatcher
-          onSuggestName={setDestination}
-          skip={!!nearbyAnchor}
-        />
+        <SearchHereWatcher skip={!!nearbyAnchor} />
       </Map>
 
       <MapControlsPanel open={controlsOpen} onToggle={onToggleControls} />
@@ -545,16 +545,17 @@ function ViewportWatcher({ centerLat, centerLng }) {
 // ---- Search-here watcher (mounted inside <Map>) -------------------------
 // On every map idle (after the first one, which is the initial settle right
 // after a search), reverse-geocode the current map center to a neighborhood/
-// city name and push it into the destination input via onSuggestName. The
-// "Search here" button then commits that text as a fresh full search.
+// city name and update the placeArea/placeCity chip so the user can see what
+// "Search here" will target. Does NOT write to `destination` — that would
+// change useTabQuery's queryKey and trigger a tab refetch on every pan.
 //
-// Skips while the destination input is focused (don't wipe user's typing) or
-// while nearby-mode is active (hotel-selected dims the rest of the UI).
-function SearchHereWatcher({ onSuggestName, skip }) {
+// Skips while nearby-mode is active (hotel-selected dims the rest of the UI).
+function SearchHereWatcher({ skip }) {
   const map = useMap();
   const firstIdleSkippedRef = useRef(false);
   const requestSeqRef = useRef(0);
   const skipRef = useRef(skip);
+  const setPlaceDisplay = useSearchStore((s) => s.setPlaceDisplay);
   useEffect(() => { skipRef.current = skip; }, [skip]);
 
   useEffect(() => {
@@ -567,24 +568,36 @@ function SearchHereWatcher({ onSuggestName, skip }) {
       }
       if (skipRef.current) return;
 
-      const active = document.activeElement;
-      if (active?.closest?.('.smart-search-wrap')) return;
-
       const c = map.getCenter();
       if (!c) return;
       const lat = c.lat();
       const lng = c.lng();
 
       const seq = ++requestSeqRef.current;
-      const name = await reverseGeocodePlaceName({ lat, lng }).catch(() => null);
+      // reverseGeocodeCity uses Geocoding API (~$5/1000) instead of the
+      // Places Text Search "city" probe (~$32/1000). See milestone Fix 2.
+      const [name, locality] = await Promise.all([
+        reverseGeocodePlaceName({ lat, lng }).catch(() => null),
+        reverseGeocodeCity({ lat, lng }).catch(() => null)
+      ]);
       if (seq !== requestSeqRef.current) return;
-      if (!name) return;
+      if (!name && !locality) return;
 
-      // Re-check focus after async — user may have started typing mid-flight.
-      const activeNow = document.activeElement;
-      if (activeNow?.closest?.('.smart-search-wrap')) return;
-
-      onSuggestName(name);
+      let area = name || locality || '';
+      let city = '';
+      if (name) {
+        const parts = name.split(',').map((s) => s.trim()).filter(Boolean);
+        if (parts.length >= 2) {
+          area = parts[0];
+          city = parts[1];
+        } else if (parts.length === 1) {
+          area = parts[0];
+          if (locality && locality.toLowerCase() !== parts[0].toLowerCase()) {
+            city = locality;
+          }
+        }
+      }
+      setPlaceDisplay({ area, city });
     };
 
     const listener = map.addListener('idle', handleIdle);
@@ -592,7 +605,7 @@ function SearchHereWatcher({ onSuggestName, skip }) {
       if (listener?.remove) listener.remove();
       else if (window.google?.maps?.event) window.google.maps.event.removeListener(listener);
     };
-  }, [map, onSuggestName]);
+  }, [map, setPlaceDisplay]);
 
   return null;
 }

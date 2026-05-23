@@ -10,6 +10,7 @@ import {
 import {
   geocodeDestination,
   reverseGeocodeCity,
+  reverseGeocodePlaceName,
   clearViewportCache
 } from '../services/googleMaps';
 import { fetchWeather, fetchLastYearWeather } from '../services/weather';
@@ -86,6 +87,7 @@ export function TripProvider({ children }) {
   const setCoords = useSearchStore((s) => s.setCoords);
   const setWeatherTarget = useSearchStore((s) => s.setWeatherTarget);
   const setSearchRadius = useSearchStore((s) => s.setSearchRadius);
+  const setPlaceDisplay = useSearchStore((s) => s.setPlaceDisplay);
   const setActiveTab = useSearchStore((s) => s.setActiveTab);
   const setLoading = useSearchStore((s) => s.setLoading);
   const setError = useSearchStore((s) => s.setError);
@@ -164,6 +166,41 @@ export function TripProvider({ children }) {
   const lastSyncedUserRef = useRef(null);
 
   const requestSeq = useRef(0);
+
+  // Whenever viewportTarget changes (user panned), re-resolve place display
+  // so the search-bar chip stays in sync with the visible map center.
+  const placeResolveSeq = useRef(0);
+  useEffect(() => {
+    if (!viewportTarget) return;
+    const { lat, lng } = viewportTarget;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const seq = ++placeResolveSeq.current;
+    // Cost: reverseGeocodeCity uses Geocoding API (~$5/1000) instead of the
+    // Places Text Search "city" probe (~$32/1000). See milestone Fix 2.
+    Promise.all([
+      reverseGeocodePlaceName({ lat, lng }).catch(() => null),
+      reverseGeocodeCity({ lat, lng }).catch(() => null)
+    ]).then(([name, locality]) => {
+      if (seq !== placeResolveSeq.current) return;
+      if (!name && !locality) return;
+      let area = name || locality || '';
+      let city = '';
+      if (name) {
+        const parts = name.split(',').map((s) => s.trim()).filter(Boolean);
+        if (parts.length >= 2) {
+          area = parts[0];
+          city = parts[1];
+        } else if (parts.length === 1) {
+          area = parts[0];
+          if (locality && locality.toLowerCase() !== parts[0].toLowerCase()) {
+            city = locality;
+          }
+        }
+      }
+      setPlaceDisplay({ area, city });
+    });
+  }, [viewportTarget?.lat, viewportTarget?.lng, setPlaceDisplay]);
+
   // Sync state -> URL (shareable)
   useEffect(() => {
     const u = new URL(window.location.href);
@@ -252,6 +289,7 @@ export function TripProvider({ children }) {
         setActiveTab('activities');
         saveUIState({ activeTab: 'activities', selectedPlaceId: null });
         setWeatherTarget(null);
+        setPlaceDisplay({ area: '', city: '' });
         // Clear events query so old destination's events don't linger.
         queryClient.removeQueries({ queryKey: ['events'] });
         setSelectedHotelId(null);
@@ -293,6 +331,29 @@ export function TripProvider({ children }) {
         // Set weather target — auto-triggers useCurrentWeather hook subscribers.
         const weatherTarget = { lat: geo.lat, lng: geo.lng, dateISO: dt };
         setWeatherTarget(weatherTarget);
+
+        // Derive area + city for the summary chip from the geocode result we
+        // already have — no extra API calls. formattedAddress looks like
+        // "Shibuya City, Tokyo, Japan" or "Tokyo, Japan". Trim trailing
+        // country segment; first segment = area, second (if any) = city.
+        // See milestone Fix 9.
+        {
+          const parts = (geo.formattedAddress || dest)
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+          let area = dest;
+          let displayCity = '';
+          if (parts.length >= 3) {
+            area = parts[0];
+            displayCity = parts[1];
+          } else if (parts.length === 2) {
+            area = parts[0];
+          } else if (parts.length === 1) {
+            area = parts[0];
+          }
+          setPlaceDisplay({ area, city: displayCity });
+        }
 
         // Phase 1 (in parallel): current weather + activities (default tab).
         // fetchQuery both seeds the cache (so hook subscribers render) and
@@ -384,7 +445,7 @@ export function TripProvider({ children }) {
       }
     },
     // All store setters are stable — search reads fresh state via getState().
-    [setDestination, setDate, setCoords, setWeatherTarget, setSearchRadius, setLoading, setError, setSelectedPlaceId, setActiveTab]
+    [setDestination, setDate, setCoords, setWeatherTarget, setSearchRadius, setPlaceDisplay, setLoading, setError, setSelectedPlaceId, setActiveTab]
   );
 
 
