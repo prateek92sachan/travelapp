@@ -76,7 +76,15 @@ export async function enrichWithWiki(places, context = '') {
   const enriched = await Promise.all(
     places.map(async (p) => {
       const wiki = await fetchWikiSummary(p.name, context);
-      return wiki ? { ...p, wiki } : p;
+      if (!wiki) return p;
+      // Prefer free Wikimedia thumbnail over Google Places photo when available
+      // (places that have a Wikipedia article are usually famous landmarks
+      // where Wiki photos are appropriate; saves Google Photos API call).
+      return {
+        ...p,
+        wiki,
+        photoUrl: wiki.thumbnail || p.photoUrl
+      };
     })
   );
   return enriched;
