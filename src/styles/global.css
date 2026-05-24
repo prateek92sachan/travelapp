@@ -1909,6 +1909,61 @@ input { font-family: inherit; }
   /* paint 1px directly under chip in panel-bg color — hides panel's top border at this column */
   box-shadow: 0 1px 0 0 var(--bg-input);
 }
+.wishlist-list-chip.ghost {
+  border: 1px dashed var(--border);
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  color: var(--text-muted);
+  opacity: 0.85;
+  font-weight: 500;
+  font-style: italic;
+  background: transparent;
+}
+.wishlist-list-chip.ghost:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  opacity: 1;
+}
+.wishlist-list-chip.ghost.active {
+  border-style: solid;
+  background: var(--bg-input);
+  color: var(--text);
+  font-weight: 700;
+  font-style: normal;
+  opacity: 1;
+  z-index: 2;
+  box-shadow: 0 1px 0 0 var(--bg-input);
+}
+.wishlist-list-chip-ghost-hint {
+  font-weight: 700;
+  font-style: normal;
+  color: var(--accent);
+  margin-left: 2px;
+}
+.wishlist-add-city-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 9px 14px;
+  background: var(--bg-elevated);
+  border: 1px dashed var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.wishlist-add-city-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  border-style: solid;
+}
+.wishlist-add-city-btn.inline {
+  margin: 0 0 10px;
+  align-self: flex-start;
+}
 .wishlist-list-chip-actions {
   display: inline-flex;
   align-items: center;

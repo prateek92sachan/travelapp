@@ -4,7 +4,13 @@ import { Compass, Utensils, Leaf, Gem, BedDouble, Heart, Navigation, Phone, Glob
 import Card from './Card';
 import { useSearchStore } from '../stores/searchStore';
 import { useMapStore } from '../stores/mapStore';
-import { useWishlistStore, selectLists, selectActiveListId } from '../stores/wishlistStore';
+import {
+  useWishlistStore,
+  selectLists,
+  selectActiveListId,
+  selectGhostCity,
+  resolveActiveForMode,
+} from '../stores/wishlistStore';
 import { useTabQuery, TAB_KEYS } from '../hooks/queries/useTabQuery';
 import { useNearbyQuery } from '../hooks/queries/useNearbyQuery';
 import { useViewportQuery } from '../hooks/queries/useViewportQuery';
@@ -18,6 +24,14 @@ import { shortenAddress } from '../utils/shortenAddress';
 import { countPlannedPlaces } from '../utils/plan';
 
 const shortListName = shortenAddress;
+
+// City-segment match: ghost may carry a full formatted address ("Cairo,
+// Cairo Governorate, Egypt") while saved list destinations may be just the
+// locality ("Cairo"). Strip to first comma-segment + lowercase so both sides
+// align on the city token.
+function cityKey(s) {
+  return (s || '').split(',')[0].trim().toLowerCase();
+}
 
 const TabNav = memo(function TabNav({ activeTab, tabs, onSwitch }) {
   const navRef = useRef(null);
@@ -78,16 +92,15 @@ function TabbedPlacesWidget({ expandable = true }) {
   // Wishlist domain
   const wishlistLists = useWishlistStore(selectLists);
   const activeWishlistId = useWishlistStore(selectActiveListId);
-  const activeWishlist = useMemo(
-    () => wishlistLists.find((l) => l.id === activeWishlistId) || null,
-    [wishlistLists, activeWishlistId]
-  );
+  const ghostCity = useWishlistStore(selectGhostCity);
   const wAddPlace = useWishlistStore((s) => s.addPlace);
   const wAddPlaceSmart = useWishlistStore((s) => s.addPlaceSmart);
   const wRemovePlace = useWishlistStore((s) => s.removePlace);
   const wSelectList = useWishlistStore((s) => s.selectList);
   const wRenameList = useWishlistStore((s) => s.renameList);
   const wDeleteList = useWishlistStore((s) => s.deleteList);
+  const wPromoteGhost = useWishlistStore((s) => s.promoteGhost);
+  const wSetGhostCity = useWishlistStore((s) => s.setGhostCity);
   const wishlist = useWishlistStore((s) => s.wishlist);
 
   // Derive active items per priority: nearby > viewport > city tab.
@@ -107,25 +120,92 @@ function TabbedPlacesWidget({ expandable = true }) {
       tabQ.isFetching ||
       loading);
 
+  // Active list resolution: lists are mode-scoped now. When the toggle
+  // switches Plan↔Saved, we look up the corresponding list for the active
+  // city's destination in the target mode (or fall back to first list in
+  // that mode).
+  const isWishlistTab = activeTab === 'wishlist';
+  const [wishlistMode, setWishlistMode] = useState('plan');
+
+  // When ghostCity is set, the wishlist follows the focused city:
+  //   - if a real list for ghostCity exists in current mode → that list is active
+  //   - else → null (body falls into the "+ Add {ghostCity}" CTA)
+  // Without a ghost we fall back to the existing same-destination resolution.
+  const activeWishlist = useMemo(() => {
+    if (ghostCity) {
+      const norm = cityKey(ghostCity);
+      const match = (wishlist.lists || []).find(
+        (l) => l.mode === wishlistMode && cityKey(l.destination) === norm
+      );
+      return match || null;
+    }
+    return resolveActiveForMode(wishlist, wishlistMode);
+  }, [wishlist, wishlistMode, ghostCity]);
+
+  // Lifted from WishlistTab so head (workspace + city tabs) can render as
+  // sticky topBands above stickyNav while body stays in card-body.
+  const wishlistState = useWishlistTabState({
+    activeList: activeWishlist,
+    mode: wishlistMode,
+    setMode: setWishlistMode,
+    onRename: (id, n) => wRenameList({ listId: id, name: n }),
+    onDelete: (id) => wDeleteList(id),
+    // Chip click also realigns ghostCity to the chip's destination so the
+    // ghost-aware activeWishlist memo picks up the clicked list as active.
+    onSelect: (id) => {
+      wSelectList(id);
+      const list = (wishlistLists || []).find((l) => l.id === id);
+      if (list?.destination) wSetGhostCity(list.destination);
+    },
+  });
+
+  // Visible chips: only lists matching current mode.
+  const visibleLists = useMemo(
+    () => wishlistLists.filter((l) => l.mode === wishlistState.mode),
+    [wishlistLists, wishlistState.mode]
+  );
+
+  // Ghost chip: viewport-or-search city with no real list in this mode.
+  const showGhost = useMemo(() => {
+    if (!ghostCity) return false;
+    const norm = cityKey(ghostCity);
+    return !visibleLists.some((l) => cityKey(l.destination) === norm);
+  }, [ghostCity, visibleLists]);
+
+  // Active-by-mode might differ from store's activeListId. Keep them in
+  // sync so chip strip highlight + downstream selectors agree.
+  useEffect(() => {
+    if (!isWishlistTab) return;
+    if (!activeWishlist) return;
+    if (activeWishlist.id !== activeWishlistId) {
+      wSelectList(activeWishlist.id);
+    }
+  }, [isWishlistTab, activeWishlist, activeWishlistId, wSelectList]);
+
   // Adapter wrappers preserving the legacy useTrip() callback shapes.
-  const addPlaceToWishlist = (place, category, listId = activeWishlistId) =>
+  const effectiveActiveId = activeWishlist?.id || null;
+  const addPlaceToWishlist = (place, category, listId = effectiveActiveId) =>
     wAddPlace({ listId, place, category });
   const addPlaceToSmartWishlist = (place, category) =>
-    wAddPlaceSmart({ place, category, viewportCity, fallbackListId: activeWishlistId });
-  const removePlaceFromWishlist = (placeId, listId = activeWishlistId) =>
+    wAddPlaceSmart({ place, category, viewportCity, fallbackListId: effectiveActiveId });
+  const removePlaceFromWishlist = (placeId, listId = effectiveActiveId) =>
     wRemovePlace({ listId, placeId });
   const selectWishlistById = (listId) => wSelectList(listId);
   const renameWishlistById = (listId, name) => wRenameList({ listId, name });
   const deleteWishlistById = (listId) => wDeleteList(listId);
-  const isWishlisted = (placeId, listId = activeWishlistId) =>
+  const isWishlisted = (placeId, listId = effectiveActiveId) =>
     useWishlistStore.getState().isWishlisted(listId, placeId);
-  // Smart list resolution: viewport mode → city-named list; else → active list.
+
+  // Saves on non-wishlist tabs always target the Saved-mode list for the
+  // viewport city (created on the fly if needed).
   const effectiveListId = useMemo(() => {
-    if (!viewportCity) return activeWishlistId;
+    if (!viewportCity) return effectiveActiveId;
     const norm = viewportCity.toLowerCase();
-    return wishlistLists.find((l) => l.destination?.toLowerCase() === norm)?.id || null;
+    return wishlistLists.find(
+      (l) => l.mode === 'saved' && l.destination?.toLowerCase() === norm
+    )?.id || null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewportCity, wishlistLists, activeWishlistId, wishlist]);
+  }, [viewportCity, wishlistLists, effectiveActiveId, wishlist]);
 
   const saveListName = viewportCity
     ? shortListName(viewportCity)
@@ -134,17 +214,7 @@ function TabbedPlacesWidget({ expandable = true }) {
   // Use selectedPlace directly — avoids the card vanishing when tab switches
   // before activeTabItems updates, or when data hasn't loaded yet.
   const selected = selectedPlace;
-  const isWishlistTab = activeTab === 'wishlist';
   const savedCount = activeWishlist?.items?.length || 0;
-
-  // Lifted from WishlistTab so head (workspace + city tabs) can render as
-  // sticky topBands above stickyNav while body stays in card-body.
-  const wishlistState = useWishlistTabState({
-    activeList: activeWishlist,
-    onRename: renameWishlistById,
-    onDelete: deleteWishlistById,
-    onSelect: selectWishlistById,
-  });
 
   // Refs so the re-anchor effect can read current values without them being deps.
   const selectedPlaceIdRef = useRef(selectedPlaceId);
@@ -179,15 +249,22 @@ function TabbedPlacesWidget({ expandable = true }) {
     return () => cancelAnimationFrame(raf);
   }, [activeTabItems]);
 
+  const onPromoteGhost = () => {
+    const newId = wPromoteGhost({ mode: wishlistMode });
+    if (newId) wSelectList(newId);
+  };
+
   const wishlistTopBands = isWishlistTab
     ? [
-        ...(activeWishlist
+        ...(visibleLists.length > 0 || showGhost
           ? [
               <WishlistListPicker
                 key="picker"
-                lists={wishlistLists}
-                activeListId={activeWishlistId}
+                lists={visibleLists}
+                activeListId={activeWishlist?.id || null}
                 mode={wishlistState.mode}
+                ghostCity={showGhost ? ghostCity : null}
+                onGhostClick={onPromoteGhost}
                 editingName={wishlistState.editingName}
                 editValue={wishlistState.editValue}
                 editInputRef={wishlistState.editInputRef}
@@ -204,7 +281,6 @@ function TabbedPlacesWidget({ expandable = true }) {
           : []),
         <WishlistHead
           key="head"
-          activeList={activeWishlist}
           mode={wishlistState.mode}
           setMode={wishlistState.setMode}
         />,
@@ -247,11 +323,13 @@ function TabbedPlacesWidget({ expandable = true }) {
         <div className="tab-panel" role="tabpanel">
           {isWishlistTab ? (
             <WishlistBody
-              lists={wishlistLists}
+              lists={visibleLists}
               activeList={activeWishlist}
-              activeListId={activeWishlistId}
+              activeListId={activeWishlist?.id || null}
               onRemove={removePlaceFromWishlist}
               mode={wishlistState.mode}
+              ghostCity={showGhost ? ghostCity : null}
+              onPromoteGhost={onPromoteGhost}
               pickerOpen={wishlistState.pickerOpen}
               setPickerOpen={wishlistState.setPickerOpen}
               showAddForm={wishlistState.showAddForm}
@@ -310,11 +388,10 @@ const CATEGORY_OPTIONS = [
 
 const EMPTY_ADD_FORM = { name: '', location: '', category: 'activities', duration: '', cost: '' };
 
-function useWishlistTabState({ activeList, onRename, onDelete, onSelect }) {
+function useWishlistTabState({ activeList, mode, setMode, onRename, onDelete, onSelect }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [addForm, setAddForm] = useState(EMPTY_ADD_FORM);
-  const [mode, setMode] = useState('plan'); // 'saved' | 'plan'
   const [editingName, setEditingName] = useState(false);
   const [editValue, setEditValue] = useState(activeList?.name || '');
 
@@ -388,8 +465,7 @@ function useWishlistTabState({ activeList, onRename, onDelete, onSelect }) {
   };
 }
 
-function WishlistHead({ activeList, mode, setMode }) {
-  if (!activeList) return null;
+function WishlistHead({ mode, setMode }) {
   return (
     <div className="wishlist-mode-tabs" role="tablist" aria-label="View mode">
       <button
@@ -418,6 +494,8 @@ function WishlistListPicker({
   lists,
   activeListId,
   mode,
+  ghostCity,
+  onGhostClick,
   editingName,
   editValue,
   editInputRef,
@@ -430,7 +508,7 @@ function WishlistListPicker({
   onCancelRename,
   onConfirmDelete,
 }) {
-  if (lists.length === 0) return null;
+  if (lists.length === 0 && !ghostCity) return null;
   return (
     <div className="wishlist-list-picker" role="tablist" aria-label="Wishlist lists">
       {lists.map((list) => {
@@ -503,6 +581,25 @@ function WishlistListPicker({
           </div>
         );
       })}
+      {ghostCity && (
+        <div
+          role="tab"
+          tabIndex={0}
+          aria-selected={!activeListId}
+          className={`wishlist-list-chip ghost ${!activeListId ? 'active' : ''}`}
+          onClick={onGhostClick}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onGhostClick();
+            }
+          }}
+          title={`Add ${ghostCity} to ${mode === 'plan' ? 'Plan' : 'Saved'}`}
+        >
+          <span>{shortListName(ghostCity)}</span>
+          <span className="wishlist-list-chip-ghost-hint">+</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -513,6 +610,8 @@ function WishlistBody({
   activeListId,
   onRemove,
   mode,
+  ghostCity,
+  onPromoteGhost,
   pickerOpen,
   setPickerOpen,
   showAddForm,
@@ -566,10 +665,32 @@ function WishlistBody({
 
       {!activeList ? (
         <div className="wishlist-empty-panel">
-          Search a place to start a wishlist automatically.
+          {ghostCity ? (
+            <>
+              <div>No {mode === 'plan' ? 'plan' : 'saved'} list yet for <strong>{ghostCity}</strong>.</div>
+              <button
+                type="button"
+                className="wishlist-add-city-btn"
+                onClick={onPromoteGhost}
+              >
+                + Add {ghostCity} to {mode === 'plan' ? 'Plan' : 'Saved'}
+              </button>
+            </>
+          ) : (
+            <>Search a city to start a {mode === 'plan' ? 'plan' : 'wishlist'}.</>
+          )}
         </div>
       ) : (
         <div className="wishlist-active-panel">
+          {ghostCity && (
+            <button
+              type="button"
+              className="wishlist-add-city-btn inline"
+              onClick={onPromoteGhost}
+            >
+              + Add {ghostCity} to {mode === 'plan' ? 'Plan' : 'Saved'}
+            </button>
+          )}
           {mode === 'plan' ? (
             <PlanMode list={activeList} />
           ) : activeList.items.length === 0 ? (
