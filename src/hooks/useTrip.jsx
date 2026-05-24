@@ -14,7 +14,16 @@ import {
   clearViewportCache
 } from '../services/googleMaps';
 import { fetchWeather, fetchLastYearWeather } from '../services/weather';
-import { saveRecentTrip, getRecentTrips, replaceRecentTrips } from '../utils/recentTrips';
+import {
+  saveRecentTrip,
+  getRecentTrips,
+  replaceRecentTrips,
+  setRecentTripsCloudWriter,
+  setRecentTripsSyncing,
+} from '../utils/recentTrips';
+import * as wishlistSync from '../services/wishlistSync';
+import * as recentTripsSync from '../services/recentTripsSync';
+import { migrateLegacyUserDoc } from '../services/userMigration';
 import { getCachedPlaces, setCachedPlaces } from '../utils/placeCache';
 import { saveUIState, getUIState } from '../utils/uiState';
 import { haversineKm } from '../utils/geo';
@@ -160,9 +169,9 @@ export function TripProvider({ children }) {
     vpGemsQ.isFetching ||
     vpHotelsQ.isFetching;
 
-  // Auth + cloud sync
-  const { user, saveToCloud, loadFromCloud } = useAuth();
-  const saveToCloudRef = useRef(saveToCloud);
+  // Auth + cloud sync — per-mutation writes via wishlistStore.cloudWriter
+  // (installed on sign-in below). No more bulk doc rewrites.
+  const { user } = useAuth();
   const lastSyncedUserRef = useRef(null);
 
   const requestSeq = useRef(0);
@@ -210,39 +219,92 @@ export function TripProvider({ children }) {
     window.history.replaceState({}, '', u.toString());
   }, [destination, date]);
 
+  // On sign-in: migrate legacy v3 blob → v4 subcollections (one-shot, idempotent),
+  // hydrate local stores from cloud, then install per-mutation cloud writers.
+  // On sign-out: tear down writers so mutations stay local-only.
   useEffect(() => {
-    saveToCloudRef.current = saveToCloud;
-  }, [saveToCloud]);
-
-  // On sign-in: load from Firestore → restore state; if no cloud data, upload local
-  useEffect(() => {
-    if (!user) { lastSyncedUserRef.current = null; return; }
+    if (!user) {
+      lastSyncedUserRef.current = null;
+      useWishlistStore.getState().setCloudWriter(null);
+      setRecentTripsCloudWriter(null);
+      return;
+    }
     if (lastSyncedUserRef.current === user.uid) return;
     lastSyncedUserRef.current = user.uid;
 
-    loadFromCloud()
-      .then((cloudData) => {
-        if (!cloudData?.wishlist) {
-          saveToCloud({
-            wishlist: useWishlistStore.getState().wishlist,
-            recentTrips: getRecentTrips()
-          });
-          return;
-        }
-        useWishlistStore.getState().replace(cloudData.wishlist);
-        if (cloudData.recentTrips) replaceRecentTrips(cloudData.recentTrips);
-      })
-      .catch((err) => { if (err.name !== 'AbortError') console.warn('Cloud load on sign-in failed:', err); });
-  }, [user, loadFromCloud, saveToCloud]);
+    const uid = user.uid;
+    let cancelled = false;
+    const wishlistStore = useWishlistStore.getState();
 
-  // Debounced cloud save whenever wishlist changes (also ships latest recentTrips)
-  useEffect(() => {
-    if (!user) return;
-    const timer = setTimeout(() => {
-      saveToCloud({ wishlist, recentTrips: getRecentTrips() });
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [wishlist, user, saveToCloud]);
+    (async () => {
+      try {
+        await migrateLegacyUserDoc(uid);
+        if (cancelled) return;
+
+        const [cloudWishlist, cloudTrips] = await Promise.all([
+          wishlistSync.loadAllWishlist(uid),
+          recentTripsSync.loadAllTrips(uid),
+        ]);
+        if (cancelled) return;
+
+        const hasCloudData = (cloudWishlist.lists?.length || 0) > 0 || cloudTrips.length > 0;
+
+        if (hasCloudData) {
+          // Cloud is source of truth. Apply under sync-guard so the dual-write
+          // path in stores/utils doesn't echo back to Firestore.
+          wishlistStore.setSyncing(true);
+          setRecentTripsSyncing(true);
+          try {
+            wishlistStore.replace(cloudWishlist);
+            replaceRecentTrips(cloudTrips);
+          } finally {
+            wishlistStore.setSyncing(false);
+            setRecentTripsSyncing(false);
+          }
+        }
+
+        // Bind writers to this uid. Each store mutation now writes a delta.
+        wishlistStore.setCloudWriter({
+          upsertList: (list) => wishlistSync.upsertList(uid, list),
+          deleteList: (list) => wishlistSync.deleteList(uid, list),
+          upsertItem: (list, item) => wishlistSync.upsertItem(uid, list, item),
+          removeItem: (list, placeId) => wishlistSync.removeItem(uid, list, placeId),
+          updatePlan: (list) => wishlistSync.updatePlan(uid, list),
+          setActiveListId: (id) => wishlistSync.setActiveListId(uid, id),
+        });
+        setRecentTripsCloudWriter({
+          upsertTrip: (trip) => recentTripsSync.upsertTrip(uid, trip),
+          deleteTrip: (trip) => recentTripsSync.deleteTrip(uid, trip),
+        });
+
+        // First-time / post-migration empty cloud: seed from current local state.
+        if (!hasCloudData) {
+          const localLists = wishlistStore.wishlist.lists || [];
+          for (const list of localLists) {
+            await wishlistSync.upsertList(uid, list);
+            for (const item of list.items || []) {
+              await wishlistSync.upsertItem(uid, list, item);
+            }
+            if (list.mode === 'plan' && list.plan) {
+              await wishlistSync.updatePlan(uid, list);
+            }
+          }
+          if (wishlistStore.wishlist.activeListId) {
+            await wishlistSync.setActiveListId(uid, wishlistStore.wishlist.activeListId);
+          }
+          for (const trip of getRecentTrips()) {
+            await recentTripsSync.upsertTrip(uid, trip);
+          }
+        }
+      } catch (err) {
+        if (!cancelled && err.name !== 'AbortError') {
+          console.warn('Cloud sync on sign-in failed:', err);
+        }
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [user]);
 
   // ---- Tab switching ------------------------------------------------------
   // All five tab queries are subscribed at the top of this provider, so tab
@@ -259,7 +321,7 @@ export function TripProvider({ children }) {
 
   const search = useCallback(
     async (overrides = {}) => {
-      const { silentRefresh = false } = overrides;
+      const { silentRefresh = false, skipRecents = false, preserveSelection = false } = overrides;
       const snap = useSearchStore.getState();
       const dest = overrides.destination ?? snap.destination;
       const dt = overrides.date ?? snap.date;
@@ -285,14 +347,16 @@ export function TripProvider({ children }) {
         // tab queries are disabled until the new coords land, so no fetch fires.
         queryClient.removeQueries({ queryKey: ['tab'] });
         setLoading(true);
-        setSelectedPlaceId(null);
-        setActiveTab('activities');
-        saveUIState({ activeTab: 'activities', selectedPlaceId: null });
+        if (!preserveSelection) {
+          setSelectedPlaceId(null);
+          setActiveTab('activities');
+          saveUIState({ activeTab: 'activities', selectedPlaceId: null });
+        }
         setWeatherTarget(null);
         setPlaceDisplay({ area: '', city: '' });
         // Clear events query so old destination's events don't linger.
         queryClient.removeQueries({ queryKey: ['events'] });
-        setSelectedHotelId(null);
+        if (!preserveSelection) setSelectedHotelId(null);
 
         // Exit nearby-mode and clear viewport overrides on new search
         setNearbyAnchor(null);
@@ -323,9 +387,12 @@ export function TripProvider({ children }) {
         setSearchRadius(radius);
 
         setCoords(geo);
-        useWishlistStore.getState().ensureForDestination({
+        // Prune empty lists from prior destinations and set the ghost city
+        // for this search. Does NOT auto-create a real list — user must
+        // explicitly promote via the + Add button or by adding content.
+        useWishlistStore.getState().beginDestination({
           name: dest,
-          destination: geo.formattedAddress || dest
+          destination: geo.formattedAddress || dest,
         });
 
         // Set weather target — auto-triggers useCurrentWeather hook subscribers.
@@ -385,14 +452,11 @@ export function TripProvider({ children }) {
         ]);
         if (myReq !== requestSeq.current) return;
 
-        if (!silentRefresh) {
+        if (!silentRefresh && !skipRecents) {
+          // saveRecentTrip dual-writes to localStorage + Firestore via
+          // recentTripsCloudWriter (installed on sign-in). No explicit
+          // cloud call needed here anymore.
           saveRecentTrip({ destination: dest, date: dt, formattedAddress: geo.formattedAddress });
-          if (saveToCloudRef.current) {
-            saveToCloudRef.current({
-              wishlist: useWishlistStore.getState().wishlist,
-              recentTrips: getRecentTrips()
-            });
-          }
         }
 
         // Persist Phase 1 immediately so restore shows activities + weather instantly.
@@ -586,7 +650,12 @@ export function TripProvider({ children }) {
       setWeatherTarget({ lat, lng, dateISO: useSearchStore.getState().date });
       refreshViewport({ lat, lng, radiusMeters, bounds });
       const city = await reverseGeocodeCity({ lat, lng }).catch(() => null);
-      if (city) setViewportCity(city);
+      if (city) {
+        setViewportCity(city);
+        // Update ghost so the wishlist's + Add button + ghost chip track
+        // the panned-to city live.
+        useWishlistStore.getState().setGhostCity(city);
+      }
     },
     [nearbyAnchor, refreshViewport, setWeatherTarget, setViewportCity]
   );
