@@ -2713,6 +2713,7 @@ input { font-family: inherit; }
   gap: 3px;
   margin-top: 4px;
   flex-wrap: nowrap;
+  min-width: 0;
 }
 .plan-inline-input {
   /* Functional border (≥3:1) so the editable time/expense fields read clearly. */
@@ -2734,12 +2735,12 @@ input { font-family: inherit; }
   box-shadow: 0 0 0 2px rgba(34, 34, 34, 0.08);
 }
 .plan-inline-input[type="time"] {
-  width: 86px;
+  width: 82px;
   flex-shrink: 0;
 }
 .plan-inline-expense {
   flex: 1 1 auto;
-  min-width: 40px;
+  min-width: 0;
   max-width: 80px;
 }
 .plan-inline-sep {
