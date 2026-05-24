@@ -51,9 +51,48 @@ export async function geocodeDestination(destination) {
   };
 }
 
+// ---- Reverse-geocode result cache ----------------------------------------
+//
+// Map idle events fire reverseGeocodeCity + reverseGeocodePlaceName on every
+// settled pan. With Fix 1's debounce + min-move guard, repeats are rare but
+// still happen (e.g. user pans away and back, or tab refocus triggers idle).
+// Quantize coords to ~110m buckets so near-identical calls hit the cache.
+// TTL 30 min — these names don't change quickly. See milestone Fix 5.
+
+const REV_GEO_CACHE = new Map();
+const REV_GEO_TTL_MS = 30 * 60 * 1000;
+const REV_GEO_BUCKET = 0.001; // ≈ 110 m at the equator
+const REV_GEO_MAX = 200;
+
+function revGeoKey(kind, lat, lng) {
+  const q = (n) => (Math.round(n / REV_GEO_BUCKET) * REV_GEO_BUCKET).toFixed(3);
+  return `${kind}:${q(lat)}:${q(lng)}`;
+}
+
+function revGeoGet(kind, lat, lng) {
+  const key = revGeoKey(kind, lat, lng);
+  const hit = REV_GEO_CACHE.get(key);
+  if (!hit) return undefined;
+  if (Date.now() - hit.time > REV_GEO_TTL_MS) {
+    REV_GEO_CACHE.delete(key);
+    return undefined;
+  }
+  return hit.value;
+}
+
+function revGeoSet(kind, lat, lng, value) {
+  const key = revGeoKey(kind, lat, lng);
+  REV_GEO_CACHE.set(key, { value, time: Date.now() });
+  if (REV_GEO_CACHE.size > REV_GEO_MAX) {
+    REV_GEO_CACHE.delete(REV_GEO_CACHE.keys().next().value);
+  }
+}
+
 // Reverse geocode a lat/lng to a city name (locality or admin level 2).
 // Returns null on failure — always safe to ignore.
 export async function reverseGeocodeCity({ lat, lng }) {
+  const cached = revGeoGet('city', lat, lng);
+  if (cached !== undefined) return cached;
   const url =
     `https://maps.googleapis.com/maps/api/geocode/json` +
     `?latlng=${lat},${lng}` +
@@ -69,7 +108,104 @@ export async function reverseGeocodeCity({ lat, lng }) {
     const components = data.results[0].address_components || [];
     const locality = components.find((c) => c.types.includes('locality'));
     const level2 = components.find((c) => c.types.includes('administrative_area_level_2'));
-    return locality?.long_name || level2?.long_name || null;
+    const value = locality?.long_name || level2?.long_name || null;
+    revGeoSet('city', lat, lng, value);
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+// Reverse geocode a lat/lng to the most useful place name for a search input.
+// Prefers neighborhood/sublocality, falls back to locality, then admin level 2.
+// Returns a string like "Shibuya, Tokyo" when a neighborhood is found,
+// otherwise just "Tokyo". Returns null on failure.
+export async function reverseGeocodePlaceName({ lat, lng }) {
+  const cached = revGeoGet('placeName', lat, lng);
+  if (cached !== undefined) return cached;
+  const url =
+    `https://maps.googleapis.com/maps/api/geocode/json` +
+    `?latlng=${lat},${lng}` +
+    `&result_type=neighborhood|sublocality|locality|administrative_area_level_2` +
+    `&key=${GOOGLE_MAPS_KEY}`;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.status !== 'OK' || !data.results?.length) return null;
+
+    // Walk results in preference order. Each result has its own address_components.
+    const TYPE_PRIORITY = ['neighborhood', 'sublocality', 'locality', 'administrative_area_level_2'];
+    let best = null;
+    for (const t of TYPE_PRIORITY) {
+      const hit = data.results.find((r) => (r.types || []).includes(t));
+      if (hit) { best = { result: hit, type: t }; break; }
+    }
+    if (!best) return null;
+
+    const components = best.result.address_components || [];
+    const primary = components.find((c) => c.types.includes(best.type))?.long_name;
+    if (!primary) return null;
+
+    let value = primary;
+    // Append locality as parent context when primary is a neighborhood/sublocality
+    if (best.type === 'neighborhood' || best.type === 'sublocality') {
+      const locality = components.find((c) => c.types.includes('locality'))?.long_name;
+      if (locality && locality !== primary) value = `${primary}, ${locality}`;
+    }
+    revGeoSet('placeName', lat, lng, value);
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Find the most prominent nearby city for display purposes.
+ *
+ * Uses Places Text Search with a "city" query biased to the given coords.
+ * Google ranks by prominence so for a town like "Hulu Langat" near KL
+ * this returns Kuala Lumpur (the famous metro it belongs to), not just
+ * the destination itself. Returns null on failure.
+ *
+ * `excludeName` lets the caller skip results that match the destination
+ * (case-insensitive), so a search for "Tokyo" doesn't return "Tokyo" as
+ * the parent city.
+ */
+export async function fetchProminentNearbyCity({ lat, lng, excludeName = '' } = {}) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': GOOGLE_MAPS_KEY,
+        'X-Goog-FieldMask': 'places.displayName'
+      },
+      body: JSON.stringify({
+        textQuery: 'city',
+        locationBias: {
+          circle: { center: { latitude: lat, longitude: lng }, radius: 50000 }
+        },
+        maxResultCount: 5
+      })
+    }).finally(() => clearTimeout(timer));
+    if (!res.ok) return null;
+    const data = await res.json();
+    const places = data.places || [];
+    const exclude = excludeName.trim().toLowerCase();
+    for (const p of places) {
+      const name = p.displayName?.text;
+      if (!name) continue;
+      if (exclude && name.toLowerCase() === exclude) continue;
+      return name;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -92,11 +228,34 @@ const PLACES_FIELD_MASK = [
  * Low-level call that the POI and activity helpers share.
  * Asks for `fetchCount` results so we have headroom to filter, then returns
  * the raw places array (filtered/ranked downstream).
+ *
+ * When `bounds` (rectangle: { low: {lat,lng}, high: {lat,lng} }) is supplied,
+ * uses `locationRestriction` — strictly restricts results to that rectangle.
+ * Otherwise falls back to `locationBias` circle (soft hint).
  */
-async function placesTextSearch({ textQuery, lat, lng, radiusMeters, fetchCount }) {
+async function placesTextSearch({ textQuery, lat, lng, radiusMeters, fetchCount, bounds }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
+    const body = {
+      textQuery,
+      maxResultCount: fetchCount
+    };
+    if (bounds) {
+      body.locationRestriction = {
+        rectangle: {
+          low:  { latitude: bounds.low.lat,  longitude: bounds.low.lng  },
+          high: { latitude: bounds.high.lat, longitude: bounds.high.lng }
+        }
+      };
+    } else {
+      body.locationBias = {
+        circle: {
+          center: { latitude: lat, longitude: lng },
+          radius: radiusMeters
+        }
+      };
+    }
     const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
       signal: controller.signal,
@@ -105,16 +264,7 @@ async function placesTextSearch({ textQuery, lat, lng, radiusMeters, fetchCount 
         'X-Goog-Api-Key': GOOGLE_MAPS_KEY,
         'X-Goog-FieldMask': PLACES_FIELD_MASK
       },
-      body: JSON.stringify({
-        textQuery,
-        maxResultCount: fetchCount,
-        locationBias: {
-          circle: {
-            center: { latitude: lat, longitude: lng },
-            radius: radiusMeters
-          }
-        }
-      })
+      body: JSON.stringify(body)
     });
     if (!res.ok) {
       const errText = await res.text();
@@ -499,7 +649,14 @@ function quantize(n) {
   return Math.round(n / COORD_BUCKET) * COORD_BUCKET;
 }
 
-function viewportCacheKey({ lat, lng, radiusMeters, category }) {
+function viewportCacheKey({ lat, lng, radiusMeters, category, bounds }) {
+  if (bounds) {
+    // Rectangle-keyed: quantize corners to ~0.5km buckets so micro-jitter
+    // (idle re-fires while map is settling) still hits the cache, but real
+    // pans/zooms get a fresh key.
+    const q = (n) => (Math.round(n / 0.005) * 0.005).toFixed(3);
+    return `rect:${q(bounds.low.lat)},${q(bounds.low.lng)}:${q(bounds.high.lat)},${q(bounds.high.lng)}:${category}`;
+  }
   return `${quantize(lat).toFixed(2)}:${quantize(lng).toFixed(2)}:${radiusMeters}:${category}`;
 }
 
@@ -530,9 +687,10 @@ export async function fetchPlacesInViewport({
   lng,
   radiusMeters = 5000,
   category = 'activities',
-  limit = 10
+  limit = 10,
+  bounds = null
 }) {
-  const key = viewportCacheKey({ lat, lng, radiusMeters, category });
+  const key = viewportCacheKey({ lat, lng, radiusMeters, category, bounds });
   const now = Date.now();
 
   // Cache hit
@@ -556,7 +714,8 @@ export async function fetchPlacesInViewport({
         lat,
         lng,
         radiusMeters,
-        fetchCount: 20
+        fetchCount: 20,
+        bounds
       });
 
       const LODGING_TYPES = ['lodging', 'hotel', 'resort_hotel', 'extended_stay_hotel'];

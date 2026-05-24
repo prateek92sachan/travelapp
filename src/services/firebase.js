@@ -11,7 +11,7 @@ import {
   onAuthStateChanged,
   browserPopupRedirectResolver,
 } from 'firebase/auth';
-import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
+import { getFirestore } from 'firebase/firestore';
 
 // Use the current origin as authDomain when on a Firebase-Hosting domain so
 // the OAuth redirect handler runs same-origin (avoids Chrome 117+ storage
@@ -61,17 +61,3 @@ export function getDb() {
 }
 
 export { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, browserPopupRedirectResolver };
-
-export async function saveUserData(uid, { wishlist, recentTrips }) {
-  const db = getDb();
-  const payload = { updatedAt: Date.now() };
-  if (wishlist !== undefined) payload.wishlist = wishlist;
-  if (recentTrips !== undefined) payload.recentTrips = recentTrips;
-  await setDoc(doc(db, 'users', uid), payload, { merge: true });
-}
-
-export async function loadUserData(uid) {
-  const db = getDb();
-  const snap = await getDoc(doc(db, 'users', uid));
-  return snap.exists() ? snap.data() : null;
-}

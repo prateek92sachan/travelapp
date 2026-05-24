@@ -1,9 +1,14 @@
 import Card from './Card';
-import { useTrip } from '../hooks/useTrip';
+import { useSearchStore } from '../stores/searchStore';
+import { useCurrentWeather, useLastYearWeather } from '../hooks/queries/useWeather';
+import { useEvents } from '../hooks/queries/useEvents';
 import { emojiFor } from '../utils/weatherIcons';
 
 export default function WeatherWidget() {
-  const { weather, lastYearWeather, events, loading } = useTrip();
+  const { data: weather, isLoading: weatherLoading } = useCurrentWeather();
+  const { data: lastYearWeather } = useLastYearWeather();
+  const { data: events = [] } = useEvents();
+  const loading = useSearchStore((s) => s.loading) || weatherLoading;
 
   return (
     <Card icon="🌤" title="Weather" expandable={false}>

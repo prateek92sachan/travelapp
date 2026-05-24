@@ -1,51 +1,64 @@
-import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
-import { Maximize2, Minimize2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTrip } from '../hooks/useTrip';
-
-const Globe = lazy(() => import('react-globe.gl'));
+import { useWishlistStore, selectLists } from '../stores/wishlistStore';
+import { useSearchStore } from '../stores/searchStore';
 
 const ACCENT = '#ff385c';
-const GLOBE_IMG_DAY = 'https://unpkg.com/three-globe/example/img/earth-day.jpg';
-const GLOBE_IMG_NIGHT = 'https://unpkg.com/three-globe/example/img/earth-night.jpg';
-const BUMP_IMG = 'https://unpkg.com/three-globe/example/img/earth-topology.png';
+const COUNTRIES_URL = '/world-countries.geojson';
 
 function isDarkTheme() {
   if (typeof document === 'undefined') return false;
   return document.documentElement.getAttribute('data-theme') === 'dark';
 }
 
+// Equirectangular: lng -> x in [0,360], lat -> y in [0,180]. viewBox 0 0 360 180.
+function featureToPath(feature) {
+  const geom = feature.geometry;
+  if (!geom) return '';
+  const polys = geom.type === 'Polygon' ? [geom.coordinates] : geom.type === 'MultiPolygon' ? geom.coordinates : [];
+  let d = '';
+  for (const poly of polys) {
+    for (const ring of poly) {
+      for (let i = 0; i < ring.length; i++) {
+        const lng = ring[i][0];
+        const lat = ring[i][1];
+        const x = (lng + 180).toFixed(2);
+        const y = (90 - lat).toFixed(2);
+        d += (i === 0 ? 'M' : 'L') + x + ',' + y + ' ';
+      }
+      d += 'Z ';
+    }
+  }
+  return d;
+}
+
 export default function EmptyStateGlobe() {
-  const { wishlistLists, setDestination } = useTrip();
-  const containerRef = useRef(null);
-  const globeRef = useRef(null);
+  const wishlistLists = useWishlistStore(selectLists);
+  const setDestination = useSearchStore((s) => s.setDestination);
+  // `search` is still a cross-domain orchestrator on TripContext; everything
+  // else this component needs is served directly by stores.
+  const { search } = useTrip();
   const [selectedListId, setSelectedListId] = useState('all');
-  const [expanded, setExpanded] = useState(false);
-  const [size, setSize] = useState({ w: 320, h: 320 });
+  const [countries, setCountries] = useState([]);
   const [dark, setDark] = useState(isDarkTheme());
 
-  // Track theme changes
   useEffect(() => {
     const obs = new MutationObserver(() => setDark(isDarkTheme()));
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     return () => obs.disconnect();
   }, []);
 
-  // Track container size for responsive globe
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver((entries) => {
-      const r = entries[0]?.contentRect;
-      if (!r) return;
-      const w = Math.max(220, Math.floor(r.width));
-      const h = Math.max(220, Math.floor(r.height));
-      setSize({ w, h });
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
+    let cancelled = false;
+    fetch(COUNTRIES_URL)
+      .then((r) => r.json())
+      .then((data) => { if (!cancelled) setCountries(data.features || []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
-  // Collect markers from all wishlist + plan snapshot places
+  const worldPath = useMemo(() => countries.map(featureToPath).join(' '), [countries]);
+
   const allPoints = useMemo(() => {
     const out = [];
     for (const list of wishlistLists) {
@@ -89,35 +102,14 @@ export default function EmptyStateGlobe() {
     return allPoints.filter((p) => p.listId === selectedListId);
   }, [allPoints, selectedListId]);
 
-  // Center globe on filtered point set
-  useEffect(() => {
-    const g = globeRef.current;
-    if (!g) return;
-    if (filteredPoints.length === 0) return;
-    let avgLat = 0, avgLng = 0;
-    for (const p of filteredPoints) { avgLat += p.lat; avgLng += p.lng; }
-    avgLat /= filteredPoints.length;
-    avgLng /= filteredPoints.length;
-    try {
-      g.pointOfView({ lat: avgLat, lng: avgLng, altitude: filteredPoints.length === 1 ? 1.6 : 2.2 }, 1200);
-    } catch {}
-  }, [filteredPoints]);
-
-  // Auto-rotate controls
-  useEffect(() => {
-    const g = globeRef.current;
-    if (!g) return;
-    const controls = g.controls?.();
-    if (!controls) return;
-    controls.autoRotate = true;
-    controls.autoRotateSpeed = 0.4;
-    controls.enableZoom = expanded;
-  }, [expanded, size.w, size.h]);
-
-  const handlePointClick = (pt) => {
+  const handlePinClick = (pt) => {
     if (!pt) return;
     const dest = pt.destination || pt.name;
-    if (dest) setDestination(dest);
+    if (!dest) return;
+    setDestination(dest);
+    if (typeof search === 'function') {
+      try { search({ destination: dest }); } catch {}
+    }
   };
 
   if (allPoints.length === 0) {
@@ -129,8 +121,11 @@ export default function EmptyStateGlobe() {
     );
   }
 
+  const landFill = dark ? '#1f2227' : '#eceef1';
+  const landStroke = dark ? '#2a2d33' : '#dadde2';
+
   return (
-    <div className={`empty-globe ${expanded ? 'expanded' : ''}`}>
+    <div className="empty-globe">
       <div className="globe-chip-strip" role="tablist" aria-label="Filter by wishlist">
         <button
           type="button"
@@ -159,41 +154,42 @@ export default function EmptyStateGlobe() {
         })}
       </div>
 
-      <div className="globe-stage" ref={containerRef}>
-        <Suspense fallback={<div className="globe-loading">Loading globe…</div>}>
-          <Globe
-            ref={globeRef}
-            width={size.w}
-            height={size.h}
-            globeImageUrl={dark ? GLOBE_IMG_NIGHT : GLOBE_IMG_DAY}
-            bumpImageUrl={BUMP_IMG}
-            backgroundColor="rgba(0,0,0,0)"
-            atmosphereColor={ACCENT}
-            atmosphereAltitude={0.18}
-            pointsData={filteredPoints}
-            pointLat={(d) => d.lat}
-            pointLng={(d) => d.lng}
-            pointColor={() => ACCENT}
-            pointAltitude={0.03}
-            pointRadius={0.45}
-            pointLabel={(d) => `<div class="globe-marker-label"><b>${d.name}</b><br><span>${d.destination}</span></div>`}
-            onPointClick={handlePointClick}
-            animateIn={false}
-          />
-        </Suspense>
-        <button
-          type="button"
-          className="globe-resize-btn"
-          onClick={() => setExpanded((v) => !v)}
-          aria-label={expanded ? 'Shrink globe' : 'Expand globe'}
-          title={expanded ? 'Shrink' : 'Expand'}
+      <div className="worldmap-stage">
+        <svg
+          className="worldmap-svg"
+          viewBox="0 0 360 180"
+          preserveAspectRatio="xMidYMid meet"
+          xmlns="http://www.w3.org/2000/svg"
+          aria-hidden
         >
-          {expanded ? (
-            <Minimize2 size={15} strokeWidth={1.75} aria-hidden />
-          ) : (
-            <Maximize2 size={15} strokeWidth={1.75} aria-hidden />
-          )}
-        </button>
+          <path d={worldPath} fill={landFill} stroke={landStroke} strokeWidth={0.3} strokeLinejoin="round" />
+        </svg>
+        {filteredPoints.map((pt) => {
+          const left = ((pt.lng + 180) / 360) * 100;
+          const top = ((90 - pt.lat) / 180) * 100;
+          return (
+            <button
+              key={pt.placeId}
+              type="button"
+              className="worldmap-pin"
+              style={{ left: `${left}%`, top: `${top}%` }}
+              onClick={() => handlePinClick(pt)}
+              aria-label={`${pt.name} — ${pt.destination}`}
+              title={`${pt.name} — ${pt.destination}`}
+            >
+              <svg width="18" height="24" viewBox="0 0 18 24" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                <path
+                  d="M9 23.5 C9 23.5 1 14 1 8 A8 8 0 1 1 17 8 C17 14 9 23.5 9 23.5 Z"
+                  fill={ACCENT}
+                  stroke="#fff"
+                  strokeWidth="1.2"
+                  strokeLinejoin="round"
+                />
+                <circle cx="9" cy="8" r="3" fill="#fff" />
+              </svg>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

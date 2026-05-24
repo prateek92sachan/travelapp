@@ -1,7 +1,7 @@
 const KEY = 'travel-app:wishlist';
 
 function emptyWishlist() {
-  return { version: 2, activeListId: null, lists: [] };
+  return { version: 3, activeListId: null, lists: [] };
 }
 
 function safeParse(raw) {
@@ -20,18 +20,93 @@ function makeId() {
   return 'wl-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+function hasPlanContent(plan) {
+  if (!plan || !Array.isArray(plan.itinerary)) return false;
+  for (const day of plan.itinerary) {
+    if (Array.isArray(day?.hotels) && day.hotels.length > 0) return true;
+    const phases = day?.phases;
+    if (!phases) continue;
+    for (const key of Object.keys(phases)) {
+      if (Array.isArray(phases[key]) && phases[key].length > 0) return true;
+    }
+  }
+  return false;
+}
+
+// v2 → v3: each list gets a `mode` field ('plan' | 'saved'). Legacy lists
+// were dual-purpose. Migration rule:
+//   - has saved items AND plan content → split into two lists (saved + plan)
+//   - has only saved items             → mode='saved'
+//   - has only plan content            → mode='plan'
+//   - has neither                      → drop
+function migrateV2ListToV3(list) {
+  const items = Array.isArray(list.items) ? list.items : [];
+  const hasItems = items.length > 0;
+  const hasPlan = hasPlanContent(list.plan);
+  if (hasItems && hasPlan) {
+    return [
+      {
+        id: list.id,
+        name: list.name,
+        destination: list.destination,
+        mode: 'saved',
+        createdAt: list.createdAt || Date.now(),
+        updatedAt: list.updatedAt || Date.now(),
+        items,
+        plan: null,
+      },
+      {
+        id: makeId(),
+        name: list.name,
+        destination: list.destination,
+        mode: 'plan',
+        createdAt: list.createdAt || Date.now(),
+        updatedAt: list.updatedAt || Date.now(),
+        items: [],
+        plan: list.plan,
+      },
+    ];
+  }
+  if (hasItems) {
+    return [{
+      id: list.id, name: list.name, destination: list.destination,
+      mode: 'saved', createdAt: list.createdAt || Date.now(), updatedAt: list.updatedAt || Date.now(),
+      items, plan: null,
+    }];
+  }
+  if (hasPlan) {
+    return [{
+      id: list.id, name: list.name, destination: list.destination,
+      mode: 'plan', createdAt: list.createdAt || Date.now(), updatedAt: list.updatedAt || Date.now(),
+      items: [], plan: list.plan,
+    }];
+  }
+  return [];
+}
+
 function normalize(raw) {
-  if (raw?.version === 2 && Array.isArray(raw.lists)) {
+  if (raw?.version === 3 && Array.isArray(raw.lists)) {
     return {
-      version: 2,
+      version: 3,
       activeListId: raw.activeListId || raw.lists[0]?.id || null,
-      // Guarantee every list has an items array (guards against corrupted data)
-      lists: raw.lists.map((l) => ({ ...l, items: Array.isArray(l.items) ? l.items : [] }))
+      lists: raw.lists.map((l) => ({
+        ...l,
+        mode: l.mode === 'plan' ? 'plan' : 'saved',
+        items: Array.isArray(l.items) ? l.items : [],
+      })),
     };
   }
 
-  // Migrate the previous destination-keyed shape into named wishlists.
-  const lists = Object.values(raw || {})
+  if (raw?.version === 2 && Array.isArray(raw.lists)) {
+    const migrated = raw.lists.flatMap(migrateV2ListToV3);
+    const stillActive = migrated.some((l) => l.id === raw.activeListId)
+      ? raw.activeListId
+      : migrated[0]?.id || null;
+    return { version: 3, activeListId: stillActive, lists: migrated };
+  }
+
+  // Pre-v2 destination-keyed shape → v2-shaped lists → migrate to v3.
+  const v2Lists = Object.values(raw || {})
     .filter((item) => item && typeof item === 'object' && Array.isArray(item.items))
     .map((item) => ({
       id: makeId(),
@@ -39,14 +114,10 @@ function normalize(raw) {
       destination: item.destination || '',
       createdAt: item.createdAt || Date.now(),
       updatedAt: item.updatedAt || Date.now(),
-      items: item.items || []
+      items: item.items || [],
     }));
-
-  return {
-    version: 2,
-    activeListId: lists[0]?.id || null,
-    lists
-  };
+  const v3Lists = v2Lists.flatMap(migrateV2ListToV3);
+  return { version: 3, activeListId: v3Lists[0]?.id || null, lists: v3Lists };
 }
 
 function persist(wishlist) {
@@ -63,51 +134,83 @@ export function getWishlist() {
   return normalize(safeParse(localStorage.getItem(KEY)));
 }
 
-export function ensureWishlistForDestination({ name, destination }) {
+// Find list by destination + mode. Case-insensitive destination match.
+export function findListByCityMode(lists, destination, mode) {
+  if (!destination || !mode) return null;
+  const norm = destination.toLowerCase();
+  return lists.find(
+    (l) => l.mode === mode && l.destination?.toLowerCase() === norm
+  ) || null;
+}
+
+// Create a real list for (destination, mode) if one doesn't already exist.
+// Prunes empty lists from previous destinations on the way in. Returns the
+// next wishlist + the activated list id.
+export function createListForDestinationMode({ name, destination, mode }) {
   const wishlist = getWishlist();
   const trimmedDestination = destination?.trim() || name?.trim() || 'Untitled wishlist';
+  const m = mode === 'plan' ? 'plan' : 'saved';
 
-  // Drop empty lists from previous destinations before switching.
   const pruned = wishlist.lists.filter(
     (l) =>
       (l.items?.length ?? 0) > 0 ||
+      hasPlanContent(l.plan) ||
       l.destination?.toLowerCase() === trimmedDestination.toLowerCase()
   );
 
   const existing = pruned.find(
-    (list) => list.destination?.toLowerCase() === trimmedDestination.toLowerCase()
+    (l) => l.mode === m && l.destination?.toLowerCase() === trimmedDestination.toLowerCase()
   );
-
   if (existing) {
-    return persist({ ...wishlist, lists: pruned, activeListId: existing.id });
+    const next = persist({ ...wishlist, lists: pruned, activeListId: existing.id });
+    return { wishlist: next, listId: existing.id };
   }
 
   const list = {
     id: makeId(),
     name: name?.trim() || trimmedDestination,
     destination: trimmedDestination,
+    mode: m,
     createdAt: Date.now(),
     updatedAt: Date.now(),
-    items: []
+    items: [],
+    plan: null,
   };
-
-  return persist({
+  const next = persist({
     ...wishlist,
     activeListId: list.id,
-    lists: [list, ...pruned]
+    lists: [list, ...pruned],
   });
+  return { wishlist: next, listId: list.id };
+}
+
+// Prune empty lists from previous destinations (called on new search). Does
+// NOT create anything. Keeps lists for the just-searched destination plus
+// any list with real content.
+export function pruneEmptyListsExceptDestination(destination) {
+  const wishlist = getWishlist();
+  const norm = destination?.trim().toLowerCase() || '';
+  const lists = wishlist.lists.filter(
+    (l) =>
+      (l.items?.length ?? 0) > 0 ||
+      hasPlanContent(l.plan) ||
+      l.destination?.toLowerCase() === norm
+  );
+  if (lists.length === wishlist.lists.length) return wishlist;
+  const stillActive = lists.some((l) => l.id === wishlist.activeListId)
+    ? wishlist.activeListId
+    : lists[0]?.id || null;
+  return persist({ ...wishlist, lists, activeListId: stillActive });
 }
 
 export function renameWishlist({ listId, name }) {
   if (!listId || !name?.trim()) return getWishlist();
-
   const wishlist = getWishlist();
   const lists = wishlist.lists.map((list) =>
     list.id === listId
       ? { ...list, name: name.trim(), updatedAt: Date.now() }
       : list
   );
-
   return persist({ ...wishlist, lists });
 }
 
@@ -134,7 +237,7 @@ export function saveWishlistPlace({ listId, place, category }) {
     estCost: place.estCost,
     estDuration: place.estDuration,
     category,
-    savedAt: Date.now()
+    savedAt: Date.now(),
   };
 
   const lists = wishlist.lists.map((list) => {
@@ -152,18 +255,16 @@ export function saveWishlistPlace({ listId, place, category }) {
 
 export function removeWishlistPlace({ listId, placeId }) {
   if (!listId || !placeId) return getWishlist();
-
   const wishlist = getWishlist();
   const lists = wishlist.lists.map((list) =>
     list.id === listId
       ? {
           ...list,
           items: list.items.filter((p) => p.placeId !== placeId),
-          updatedAt: Date.now()
+          updatedAt: Date.now(),
         }
       : list
   );
-
   return persist({ ...wishlist, lists });
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { fetchPlacePredictions, newSessionToken } from '../services/googleMaps';
 import { getRecentTrips } from '../utils/recentTrips';
 
@@ -27,7 +27,7 @@ const MIN_QUERY_LEN = 2;
  *   onSelect(v)   called when user picks a suggestion (string destination)
  *   placeholder   input placeholder
  */
-export default function SmartSearchInput({ value, onChange, onSelect, placeholder }) {
+const SmartSearchInput = forwardRef(function SmartSearchInput({ value, onChange, onSelect, placeholder }, ref) {
   const [open, setOpen] = useState(false);
   const [predictions, setPredictions] = useState([]);
   const [highlightIndex, setHighlightIndex] = useState(-1);
@@ -46,6 +46,15 @@ export default function SmartSearchInput({ value, onChange, onSelect, placeholde
     () => 'ssi-' + Math.random().toString(36).slice(2, 8),
     []
   );
+
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      setOpen(true);
+    }
+  }), []);
 
   // Build sections + a parallel array of flat items where each item already
   // knows its global index. This avoids the closure trap of mutating an
@@ -284,4 +293,6 @@ export default function SmartSearchInput({ value, onChange, onSelect, placeholde
       )}
     </div>
   );
-}
+});
+
+export default SmartSearchInput;

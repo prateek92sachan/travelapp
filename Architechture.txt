@@ -1,0 +1,26 @@
+1. Data Flow & State Management Conflicts (Zustand)
+WARNING
+
+Cross-Store Mutations & Anti-Patterns In src/stores/searchStore.js, the selectPlace and switchTab functions directly call useMapStore.getState().setSelectedHotelId(null). Why it's a problem: Mutating one store from inside another creates hidden coupling. If the map store isn't fully initialized, or if actions are dispatched in rapid succession, this can lead to race conditions and unpredictable UI updates. Fix: State updates should be orchestrated from the component level, or you should utilize a unified facade store pattern.
+
+CAUTION
+
+Dispatching DOM Events from Stores searchStore.js directly executes window.dispatchEvent(new CustomEvent(...)) for things like travelapp:focusLocation. Why it's a problem: Stores should be purely responsible for holding state. Triggering DOM side-effects directly from state setters tightly couples your data layer to the presentation layer. If the listening component unmounts or mounts late, the event is lost forever, causing the app to silently misbehave. Fix: Handle side-effects inside React components using useEffect observing state changes, rather than firing blind global events.
+
+2. Backend Services & Data Sync (Firebase)
+IMPORTANT
+
+Payload Size and Naive Merging (firebase.js) The saveUserData function blindly writes the entire wishlist and recentTrips object back to Firestore with { merge: true }. Why it's a problem: As a user adds more items to their wishlist over time, this object will grow significantly. Sending massive payloads on every single interaction (like saving one place) wastes bandwidth, slows down the app, and risks hitting Firestore's 1MB document limit. Fix: Use Firestore's arrayUnion or subcollections for wishlists instead of merging massive singular document objects.
+
+WARNING
+
+Missing Offline Persistence While firebase.js sets up browserLocalPersistence for Auth, it completely neglects offline persistence for the database. Why it's a problem: Travel apps are frequently used on the go with spotty networks. Without enableIndexedDbPersistence (or enableMultiTabIndexedDbPersistence) on the Firestore instance, the app will fail to load or save places if the user loses connection in a subway or remote area.
+
+3. API Integrations & Caching (Gemini)
+CAUTION
+
+Inefficient Cache Eviction (gemini.js) The fetchPlaceDescription function implements a rudimentary in-memory cache limited to 100 items. However, its eviction strategy (DESC_CACHE.delete(DESC_CACHE.keys().next().value)) just deletes whatever happens to be first in the map iterator. Why it's a problem: This isn't a proper Least Recently Used (LRU) cache. It will frequently delete active/recent places while keeping stale ones, leading to "cache thrashing" where the app makes redundant API calls for places the user keeps toggling between. Fix: Implement a proper LRU cache, or use a robust solution like @tanstack/react-query (which is already in your package.json) to handle API caching, deduping, and garbage collection automatically.
+
+IMPORTANT
+
+No Rate Limiting or Debouncing API calls to Gemini and Google Maps lack inherent debouncing in the service layer. If a user rapidly clicks around the map, it will fire off multiple expensive LLM/Map calls simultaneously, risking HTTP 429 (Too Many Requests) errors and unexpected UI jumps.

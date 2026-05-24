@@ -8,8 +8,6 @@ import {
   signOut as firebaseSignOut,
   onAuthStateChanged,
   browserPopupRedirectResolver,
-  saveUserData,
-  loadUserData,
 } from '../services/firebase';
 
 const isMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -55,32 +53,9 @@ export function AuthProvider({ children }) {
     await firebaseSignOut(getAuth());
   }, []);
 
-  const saveToCloud = useCallback(
-    async (data) => {
-      if (!user) return;
-      try {
-        await saveUserData(user.uid, data);
-      } catch (err) {
-        console.warn('Cloud save failed:', err);
-      }
-    },
-    [user]
-  );
-
-  const loadFromCloud = useCallback(async () => {
-    if (!user) return null;
-    try {
-      return await loadUserData(user.uid);
-    } catch (err) {
-      if (err.name === 'AbortError') return null;
-      console.warn('Cloud load failed:', err);
-      return null;
-    }
-  }, [user]);
-
   const value = useMemo(
-    () => ({ user, authReady, signIn, signOut, saveToCloud, loadFromCloud }),
-    [user, authReady, signIn, signOut, saveToCloud, loadFromCloud]
+    () => ({ user, authReady, signIn, signOut }),
+    [user, authReady, signIn, signOut]
   );
   return (
     <AuthContext.Provider value={value}>

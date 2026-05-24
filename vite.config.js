@@ -36,6 +36,9 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         navigateFallbackDenylist: [/^\/__\//],
+        // Skip precaching the lazy globe chunk (~1.8MB) — only the empty
+        // state uses it, so users that never see it shouldn't download it.
+        globIgnores: ['**/react-globe.gl-*.js'],
         runtimeCaching: [
           {
             // Geocoding: stable results, cache aggressively

@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import WeatherWidget from './WeatherWidget';
-import { useTrip } from '../hooks/useTrip';
+import { useCurrentWeather } from '../hooks/queries/useWeather';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { emojiFor } from '../utils/weatherIcons';
 
 export default function WeatherFloat() {
   const isDesktop = useIsDesktop();
-  const { weather } = useTrip();
+  const { data: weather } = useCurrentWeather();
   const [desktopExpanded, setDesktopExpanded] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(false);
 

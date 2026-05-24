@@ -1,21 +1,32 @@
-import { useState } from 'react';
-import { useTrip } from '../hooks/useTrip';
+import { useState, useRef, useEffect } from 'react';
+import { Settings, X } from 'lucide-react';
+import { useMapStore } from '../stores/mapStore';
 
 export default function MapControlsPanel({ open: openProp, onToggle: onToggleProp }) {
-  const {
-    mapType,
-    setMapType,
-    transitOn,
-    setTransitOn,
-  } = useTrip();
+  const mapType = useMapStore((s) => s.mapType);
+  const setMapType = useMapStore((s) => s.setMapType);
+  const transitOn = useMapStore((s) => s.transitOn);
+  const setTransitOn = useMapStore((s) => s.setTransitOn);
 
   const [localOpen, setLocalOpen] = useState(false);
   const controlled = openProp !== undefined;
   const open = controlled ? openProp : localOpen;
   const handleToggle = controlled ? onToggleProp : () => setLocalOpen((o) => !o);
 
+  const panelRef = useRef(null);
+  useEffect(() => {
+    if (controlled || !localOpen) return;
+    function handleClickOutside(e) {
+      if (panelRef.current && !panelRef.current.contains(e.target)) {
+        setLocalOpen(false);
+      }
+    }
+    document.addEventListener('pointerdown', handleClickOutside, true);
+    return () => document.removeEventListener('pointerdown', handleClickOutside, true);
+  }, [localOpen, controlled]);
+
   return (
-    <div className={`map-controls ${open ? 'open' : 'closed'}`}>
+    <div className={`map-controls ${open ? 'open' : 'closed'}`} ref={panelRef}>
       {!controlled && (
         <button
           type="button"
@@ -25,7 +36,7 @@ export default function MapControlsPanel({ open: openProp, onToggle: onTogglePro
           aria-label={open ? 'Hide map controls' : 'Show map controls'}
           aria-expanded={open}
         >
-          {open ? '✕' : '⚙'}
+          {open ? <X size={18} strokeWidth={2} /> : <Settings size={18} strokeWidth={1.75} />}
         </button>
       )}
 
