@@ -1,9 +1,26 @@
 import { create } from 'zustand';
 
+const PROVIDER_KEY = 'mapProvider';
+const VALID_PROVIDERS = new Set(['google', 'mapbox']);
+
+function readStoredProvider() {
+  try {
+    const v = localStorage.getItem(PROVIDER_KEY);
+    return VALID_PROVIDERS.has(v) ? v : 'google';
+  } catch {
+    return 'google';
+  }
+}
+
 export const useMapStore = create((set, get) => ({
   // Layer toggles
   mapType: 'roadmap',
   transitOn: false,
+
+  // Renderer choice. Persists to localStorage immediately + Firestore when signed in.
+  mapProvider: readStoredProvider(),
+  cloudPrefsWriter: null,
+  syncingPrefs: false,
 
   // Category visibility — drives both map markers AND tab/viewport prefetch
   // gating. Default: activities + restaurants ON so initial search only fires
@@ -22,6 +39,19 @@ export const useMapStore = create((set, get) => ({
   nearbyAnchor: null, // hotel that anchors nearby-mode; null = off
   viewportTarget: null, // { lat, lng, radiusMeters, bounds } | null
   viewportCity: null, // reverse-geocoded city name from last pan
+
+  setMapProvider: (provider) => {
+    if (!VALID_PROVIDERS.has(provider)) return;
+    if (get().mapProvider === provider) return;
+    set({ mapProvider: provider });
+    try { localStorage.setItem(PROVIDER_KEY, provider); } catch {}
+    const { cloudPrefsWriter, syncingPrefs } = get();
+    if (!syncingPrefs && cloudPrefsWriter?.setMapProvider) {
+      cloudPrefsWriter.setMapProvider(provider).catch(() => {});
+    }
+  },
+  setCloudPrefsWriter: (writer) => set({ cloudPrefsWriter: writer }),
+  setSyncingPrefs: (v) => set({ syncingPrefs: v }),
 
   setMapType: (mapType) => set({ mapType }),
   setTransitOn: (transitOn) =>

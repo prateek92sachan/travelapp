@@ -23,6 +23,7 @@ import {
 } from '../utils/recentTrips';
 import * as wishlistSync from '../services/wishlistSync';
 import * as recentTripsSync from '../services/recentTripsSync';
+import * as userPrefsSync from '../services/userPrefsSync';
 import { migrateLegacyUserDoc } from '../services/userMigration';
 import { getCachedPlaces, setCachedPlaces } from '../utils/placeCache';
 import { saveUIState, getUIState } from '../utils/uiState';
@@ -227,6 +228,7 @@ export function TripProvider({ children }) {
       lastSyncedUserRef.current = null;
       useWishlistStore.getState().setCloudWriter(null);
       setRecentTripsCloudWriter(null);
+      useMapStore.getState().setCloudPrefsWriter(null);
       return;
     }
     if (lastSyncedUserRef.current === user.uid) return;
@@ -241,9 +243,10 @@ export function TripProvider({ children }) {
         await migrateLegacyUserDoc(uid);
         if (cancelled) return;
 
-        const [cloudWishlist, cloudTrips] = await Promise.all([
+        const [cloudWishlist, cloudTrips, cloudPrefs] = await Promise.all([
           wishlistSync.loadAllWishlist(uid),
           recentTripsSync.loadAllTrips(uid),
+          userPrefsSync.loadPrefs(uid).catch(() => null),
         ]);
         if (cancelled) return;
 
@@ -261,6 +264,24 @@ export function TripProvider({ children }) {
             wishlistStore.setSyncing(false);
             setRecentTripsSyncing(false);
           }
+        }
+
+        // Hydrate map prefs under syncing guard so the setter doesn't echo back.
+        const mapStore = useMapStore.getState();
+        if (cloudPrefs?.mapProvider) {
+          mapStore.setSyncingPrefs(true);
+          try {
+            mapStore.setMapProvider(cloudPrefs.mapProvider);
+          } finally {
+            mapStore.setSyncingPrefs(false);
+          }
+        }
+        mapStore.setCloudPrefsWriter({
+          setMapProvider: (provider) => userPrefsSync.setMapProvider(uid, provider),
+        });
+        // First-time / empty cloud: seed current local provider.
+        if (!cloudPrefs?.mapProvider) {
+          await userPrefsSync.setMapProvider(uid, mapStore.mapProvider);
         }
 
         // Bind writers to this uid. Each store mutation now writes a delta.

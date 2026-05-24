@@ -3597,6 +3597,34 @@ input { font-family: inherit; }
   cursor: not-allowed;
   pointer-events: none;
 }
+.provider-toggle {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  padding: 1px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface, transparent);
+}
+.provider-toggle-btn {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  line-height: 1.4;
+  transition: background var(--transition), color var(--transition);
+}
+.provider-toggle-btn:hover {
+  color: var(--text);
+}
+.provider-toggle-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
 @keyframes slide-down-pill {
   from { opacity: 0; transform: translate(-50%, -8px); }
   to { opacity: 1; transform: translate(-50%, 0); }
