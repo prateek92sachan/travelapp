@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useRef } from 'react';
 import { Map, AdvancedMarker, useMap } from '@vis.gl/react-google-maps';
 import { GOOGLE_MAPS_MAP_ID } from '../../services/config';
-import { reverseGeocodePlaceName, reverseGeocodeCity } from '../../services/googleMaps';
+import { reverseGeocodePlaceName, reverseGeocodeCity } from '../../services/locationService';
 import { useSearchStore } from '../../stores/searchStore';
 import { useMapStore } from '../../stores/mapStore';
 import { useWishlistStore } from '../../stores/wishlistStore';

@@ -10,9 +10,9 @@ import {
 import {
   geocodeDestination,
   reverseGeocodeCity,
-  reverseGeocodePlaceName,
-  clearViewportCache
-} from '../services/googleMaps';
+  reverseGeocodePlaceName
+} from '../services/locationService';
+import { clearViewportCache } from '../services/googleMaps';
 import { fetchWeather, fetchLastYearWeather } from '../services/weather';
 import {
   saveRecentTrip,

@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react';
-import { reverseGeocodeCity } from '../../services/googleMaps';
+import { reverseGeocodeCity } from '../../services/locationService';
 import { useTrip } from '../../hooks/useTrip';
 import { useSearchStore } from '../../stores/searchStore';
 import { useMapStore } from '../../stores/mapStore';

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Map, Marker } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { MAPBOX_TOKEN } from '../../services/config';
-import { reverseGeocodePlaceName, reverseGeocodeCity } from '../../services/googleMaps';
+import { reverseGeocodePlaceName, reverseGeocodeCity } from '../../services/locationService';
 import { useSearchStore } from '../../stores/searchStore';
 import { useMapStore } from '../../stores/mapStore';
 import { useWishlistStore } from '../../stores/wishlistStore';
