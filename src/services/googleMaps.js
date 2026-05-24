@@ -519,10 +519,10 @@ function estimateCost(types = []) {
   if (t.has('park') || t.has('natural_feature') || t.has('hiking_area') || t.has('beach'))
     return 'Free';
   if (t.has('museum') || t.has('art_gallery') || t.has('zoo') || t.has('aquarium'))
-    return '$$';
-  if (t.has('amusement_park') || t.has('observation_deck')) return '$$$';
-  if (t.has('restaurant') || t.has('cafe') || t.has('bar')) return '$$';
-  return '$$';
+    return '₹₹';
+  if (t.has('amusement_park') || t.has('observation_deck')) return '₹₹₹';
+  if (t.has('restaurant') || t.has('cafe') || t.has('bar')) return '₹₹';
+  return '₹₹';
 }
 
 function estimateDuration(types = []) {
@@ -560,10 +560,10 @@ const detailsInFlight = new Map();
 
 const PRICE_LEVEL_MAP = {
   PRICE_LEVEL_FREE: 'Free',
-  PRICE_LEVEL_INEXPENSIVE: '$',
-  PRICE_LEVEL_MODERATE: '$$',
-  PRICE_LEVEL_EXPENSIVE: '$$$',
-  PRICE_LEVEL_VERY_EXPENSIVE: '$$$$'
+  PRICE_LEVEL_INEXPENSIVE: '₹',
+  PRICE_LEVEL_MODERATE: '₹₹',
+  PRICE_LEVEL_EXPENSIVE: '₹₹₹',
+  PRICE_LEVEL_VERY_EXPENSIVE: '₹₹₹₹'
 };
 
 /**

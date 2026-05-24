@@ -1,5 +1,5 @@
 import { directionsUrl } from '../services/googleMaps';
-import { formatCount } from '../utils/format';
+import { formatCount, formatPrice } from '../utils/format';
 import { shortenAddress } from '../utils/shortenAddress';
 
 export function SavedPlaceCard({ item, onRemove }) {
@@ -39,7 +39,7 @@ export function SavedPlaceCard({ item, onRemove }) {
         <div className="activity-tags">
           {item.category && <span className="tag">{categoryLabel(item.category)}</span>}
           {item.estDuration && <span className="tag">{item.estDuration}</span>}
-          {item.estCost && <span className="tag">{item.estCost}</span>}
+          {item.estCost && <span className="tag">{formatPrice(item.estCost)}</span>}
           {item.rating != null && (
             <span className="tag">
               {item.rating}

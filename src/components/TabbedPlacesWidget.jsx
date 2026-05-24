@@ -19,7 +19,7 @@ import { fetchWikiSummary } from '../services/wikipedia';
 import { fetchPlaceDescription } from '../services/gemini';
 import { SavedPlaceCard } from './WishlistPanel';
 import PlanMode from './PlanMode';
-import { formatCount } from '../utils/format';
+import { formatCount, formatPrice } from '../utils/format';
 import { shortenAddress } from '../utils/shortenAddress';
 import { countPlannedPlaces } from '../utils/plan';
 
@@ -832,7 +832,7 @@ const PlaceRow = memo(function PlaceRow({
         <div className="activity-summary">{truncated}</div>
         <div className="activity-tags">
           <span className="tag">{a.estDuration}</span>
-          <span className="tag">{a.estCost}</span>
+          <span className="tag">{formatPrice(a.estCost)}</span>
           {a.rating != null && (
             <span className="tag">
               {a.rating}
@@ -985,7 +985,7 @@ const PlaceDetail = memo(function PlaceDetail({
         </div>
         <div className="detail-stat">
           <div className="k">Cost</div>
-          <div className="v">{details?.priceLevel || place.estCost}</div>
+          <div className="v">{formatPrice(details?.priceLevel || place.estCost)}</div>
         </div>
         {place.rating != null && (
           <div className="detail-stat">
