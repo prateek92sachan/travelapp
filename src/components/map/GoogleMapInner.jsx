@@ -4,6 +4,7 @@ import { GOOGLE_MAPS_MAP_ID } from '../../services/config';
 import { reverseGeocodePlaceName, reverseGeocodeCity } from '../../services/googleMaps';
 import { useSearchStore } from '../../stores/searchStore';
 import { useMapStore } from '../../stores/mapStore';
+import { useWishlistStore } from '../../stores/wishlistStore';
 import { useTheme } from '../../hooks/useTheme';
 import MapControlsPanel from '../MapControlsPanel';
 import HotelInfoCard from '../HotelInfoCard';
@@ -302,6 +303,13 @@ function SearchHereWatcher({ skip }) {
           }
         }
         setPlaceDisplay({ area, city });
+        // Sync wishlist ghost city + viewport city label on every pan
+        if (locality) {
+          const ws = useWishlistStore.getState();
+          if (ws.ghostCity !== locality) ws.setGhostCity(locality);
+          const ms = useMapStore.getState();
+          if (ms.viewportCity !== locality) ms.setViewportCity(locality);
+        }
       }, VIEWPORT_DEBOUNCE_MS);
     };
 

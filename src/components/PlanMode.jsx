@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { useSearchStore } from '../stores/searchStore';
 import { useMapStore } from '../stores/mapStore';
-import { useWishlistStore, selectActiveListId } from '../stores/wishlistStore';
+import { useWishlistStore, selectLists } from '../stores/wishlistStore';
 import { useTabQuery } from '../hooks/queries/useTabQuery';
 import { useViewportQuery } from '../hooks/queries/useViewportQuery';
 import {
@@ -53,9 +53,22 @@ export default function PlanMode({ list }) {
   const activeTab = useSearchStore((s) => s.activeTab);
   const viewportTarget = useMapStore((s) => s.viewportTarget);
   const wUpdatePlan = useWishlistStore((s) => s.updatePlan);
-  const wAddPlace = useWishlistStore((s) => s.addPlace);
+  const wAddPlaceSmart = useWishlistStore((s) => s.addPlaceSmart);
   const wRemovePlace = useWishlistStore((s) => s.removePlace);
-  const activeWishlistId = useWishlistStore(selectActiveListId);
+  const wishlistLists = useWishlistStore(selectLists);
+
+  // Plan-mode lists hold the itinerary; saved places belong to the matching
+  // Saved-mode list for the same city. Look it up (may not exist until the
+  // user actually saves a place — addPlaceSmart will lazily create it).
+  const savedListIdForCity = useMemo(() => {
+    if (!list?.destination) return null;
+    const norm = list.destination.toLowerCase();
+    return (
+      wishlistLists.find(
+        (l) => l.mode === 'saved' && l.destination?.toLowerCase() === norm
+      )?.id || null
+    );
+  }, [wishlistLists, list?.destination]);
 
   // Tab data — one useTabQuery per category, assembled into the same shape
   // PlanMode's existing memos expect.
@@ -109,12 +122,21 @@ export default function PlanMode({ list }) {
 
   // Adapter wrappers preserving the legacy callback shapes.
   const updateListPlan = (listId, p) => wUpdatePlan({ listId, plan: p });
-  const addPlaceToWishlist = (place, category, listId = activeWishlistId) =>
-    wAddPlace({ listId, place, category });
-  const removePlaceFromWishlist = (placeId, listId = activeWishlistId) =>
-    wRemovePlace({ listId, placeId });
-  const isWishlisted = (placeId, listId = activeWishlistId) =>
-    useWishlistStore.getState().isWishlisted(listId, placeId);
+  const addPlaceToWishlist = (place, category) =>
+    wAddPlaceSmart({
+      place,
+      category,
+      viewportCity: list?.destination,
+      fallbackListId: savedListIdForCity,
+    });
+  const removePlaceFromWishlist = (placeId) => {
+    if (!savedListIdForCity) return;
+    wRemovePlace({ listId: savedListIdForCity, placeId });
+  };
+  const isWishlisted = (placeId) => {
+    if (!savedListIdForCity) return false;
+    return useWishlistStore.getState().isWishlisted(savedListIdForCity, placeId);
+  };
   const fetchTabIfNeeded = () => {}; // queries auto-fetch; noop for compat
   const plan = useMemo(() => ensurePlan(list?.plan), [list?.plan]);
 
@@ -259,12 +281,12 @@ export default function PlanMode({ list }) {
           liveDataByCategory={liveDataByCategory}
           tabLoading={tabLoading}
           fetchTabIfNeeded={fetchTabIfNeeded}
-          isSavedFn={(id) => isWishlisted(id, list.id)}
+          isSavedFn={(id) => isWishlisted(id)}
           onToggleSave={(place, category) => {
-            if (isWishlisted(place.placeId, list.id)) {
-              removePlaceFromWishlist(place.placeId, list.id);
+            if (isWishlisted(place.placeId)) {
+              removePlaceFromWishlist(place.placeId);
             } else {
-              addPlaceToWishlist(place, category, list.id);
+              addPlaceToWishlist(place, category);
             }
           }}
           onClose={() => setPicker(null)}
@@ -286,12 +308,12 @@ export default function PlanMode({ list }) {
           hotels={liveDataByCategory.hotels || []}
           hotelsLoading={!!tabLoading?.hotels}
           fetchTabIfNeeded={fetchTabIfNeeded}
-          isSavedFn={(id) => isWishlisted(id, list.id)}
+          isSavedFn={(id) => isWishlisted(id)}
           onToggleSave={(place) => {
-            if (isWishlisted(place.placeId, list.id)) {
-              removePlaceFromWishlist(place.placeId, list.id);
+            if (isWishlisted(place.placeId)) {
+              removePlaceFromWishlist(place.placeId);
             } else {
-              addPlaceToWishlist(place, 'hotels', list.id);
+              addPlaceToWishlist(place, 'hotels');
             }
           }}
           onClose={() => setHotelPicker(null)}

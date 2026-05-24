@@ -24,6 +24,8 @@ export const useSearchStore = create((set, get) => ({
   coords: null,
   weatherTarget: null, // { lat, lng, dateISO } — query key for weather hooks
   searchRadiusMeters: 20000, // derived from geocode viewport; used by tab queries
+  placeArea: '', // sublocality/locality of the searched place (e.g. "Hulu Langat")
+  placeCity: '', // nearest prominent city for display (e.g. "Kuala Lumpur")
   activeTab: 'activities',
   loading: false,
   error: null,
@@ -35,6 +37,7 @@ export const useSearchStore = create((set, get) => ({
   setCoords: (v) => set({ coords: v }),
   setWeatherTarget: (v) => set({ weatherTarget: v }),
   setSearchRadius: (v) => set({ searchRadiusMeters: v }),
+  setPlaceDisplay: ({ area, city }) => set({ placeArea: area || '', placeCity: city || '' }),
   setActiveTab: (v) => set({ activeTab: v }),
   setLoading: (v) => set({ loading: v }),
   setError: (v) => set({ error: v }),

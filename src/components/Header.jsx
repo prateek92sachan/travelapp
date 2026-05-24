@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { Clock, Link2, Heart, Menu, Moon, Sun } from 'lucide-react';
+import { Clock, Link2, Menu, Moon, Sun } from 'lucide-react';
 import { useTrip } from '../hooks/useTrip';
+import { useSearchStore } from '../stores/searchStore';
 import { useTheme } from '../hooks/useTheme';
 import { useAuth } from '../hooks/useAuth';
 import { useIsDesktop } from '../hooks/useIsDesktop';
@@ -13,6 +14,8 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 
 export default function Header() {
   const { destination, setDestination, date, setDate, search, loading, coords } = useTrip();
+  const placeArea = useSearchStore((s) => s.placeArea);
+  const placeCity = useSearchStore((s) => s.placeCity);
   const { theme, toggle } = useTheme();
   const { user, authReady, signIn, signOut } = useAuth();
   const isDesktop = useIsDesktop();
@@ -22,10 +25,14 @@ export default function Header() {
   const [authMenuOpen, setAuthMenuOpen] = useState(false);
   const [hamburgerOpen, setHamburgerOpen] = useState(false);
   const [wishlistOpen, setWishlistOpen] = useState(false);
+  const [placePickerOpen, setPlacePickerOpen] = useState(false);
   const recentRef = useRef(null);
   const authMenuRef = useRef(null);
   const hamburgerRef = useRef(null);
   const headerRef = useRef(null);
+  const popoverSearchRef = useRef(null);
+  const placePopoverRef = useRef(null);
+  const hiddenDateRef = useRef(null);
 
   useEffect(() => {
     if (recentOpen) setRecents(getRecentTrips());
@@ -34,7 +41,9 @@ export default function Header() {
   useClickOutside(recentRef, recentOpen, () => setRecentOpen(false));
   useClickOutside(authMenuRef, authMenuOpen, () => setAuthMenuOpen(false));
   useClickOutside(hamburgerRef, hamburgerOpen, () => setHamburgerOpen(false));
+  useClickOutside(placePopoverRef, placePickerOpen, () => setPlacePickerOpen(false));
   useEscapeKey(wishlistOpen, () => setWishlistOpen(false));
+  useEscapeKey(placePickerOpen, () => setPlacePickerOpen(false));
 
   // Auto-collapse search on mobile after a successful search
   useEffect(() => {
@@ -58,6 +67,13 @@ export default function Header() {
     ro.observe(el);
     return () => ro.disconnect();
   }, [isDesktop]);
+
+  // Focus search input when place picker opens
+  useEffect(() => {
+    if (!placePickerOpen) return;
+    const id = requestAnimationFrame(() => popoverSearchRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [placePickerOpen]);
 
   // Collapse search when tapping outside the header on mobile
   useEffect(() => {
@@ -137,22 +153,90 @@ export default function Header() {
               </div>
             )}
           </div>
-          <span>Travel</span>
         </div>
 
-        {showSummary && (
-          <button
-            type="button"
-            className="search-summary"
-            onClick={() => setSearchOpen(true)}
-            aria-label="Edit search"
-          >
-            <span className="search-summary-dest">{destination || 'Where to?'}</span>
-            {date && <span className="search-summary-sep">·</span>}
-            {date && <span className="search-summary-date">{date}</span>}
-            <span className="search-summary-edit">✎</span>
-          </button>
-        )}
+        {showSummary && (() => {
+          const area = placeArea || destination || 'Where to?';
+          const city = placeCity || '';
+          // Date: row 1 = "Wed, 20"; row 2 = "May '26".
+          let line1 = '';
+          let line2 = '';
+          if (date) {
+            const d = new Date(date);
+            if (!Number.isNaN(d.getTime())) {
+              const weekday = d.toLocaleDateString('en-US', { weekday: 'short' });
+              const day = d.toLocaleDateString('en-US', { day: '2-digit' });
+              const month = d.toLocaleDateString('en-US', { month: 'short' });
+              const yy = String(d.getFullYear()).slice(-2);
+              line1 = `${weekday} ${day}`;
+              line2 = `${month} '${yy}`;
+            } else {
+              line1 = date;
+            }
+          }
+          const openDatePicker = () => {
+            const el = hiddenDateRef.current;
+            if (!el) return;
+            el.focus();
+            try { el.showPicker?.(); } catch {}
+          };
+          return (
+            <div className="search-summary-wrap" ref={placePopoverRef}>
+              <div className="search-summary" role="group" aria-label="Edit search">
+                <button
+                  type="button"
+                  className="search-summary-btn search-summary-place"
+                  onClick={() => setPlacePickerOpen(true)}
+                  aria-label="Edit destination"
+                >
+                  <span className="search-summary-area">{area}</span>
+                  <span className="search-summary-city">{city || '\u200b'}</span>
+                </button>
+                {date && (
+                  <button
+                    type="button"
+                    className="search-summary-btn search-summary-date"
+                    onClick={openDatePicker}
+                    aria-label="Edit date"
+                  >
+                    <span className="search-summary-date-line">{line1}</span>
+                    <span className="search-summary-year">{line2}</span>
+                  </button>
+                )}
+              </div>
+              <input
+                ref={hiddenDateRef}
+                className="hidden-date-input"
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                aria-label="Trip date"
+                tabIndex={-1}
+              />
+              {placePickerOpen && (
+                <>
+                  <div
+                    className="search-summary-backdrop"
+                    onMouseDown={() => setPlacePickerOpen(false)}
+                    onTouchStart={() => setPlacePickerOpen(false)}
+                  />
+                  <div className="search-summary-popover">
+                    <SmartSearchInput
+                      ref={popoverSearchRef}
+                      value={destination}
+                      onChange={setDestination}
+                      onSelect={(dest) => {
+                        setPlacePickerOpen(false);
+                        search({ destination: dest });
+                      }}
+                      placeholder="Where to?"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
 
         {showSearch && (
           <form className="search-row" onSubmit={onSubmit}>
@@ -225,16 +309,6 @@ export default function Header() {
           aria-label="Share trip"
         >
           <Link2 size={16} strokeWidth={1.75} aria-hidden />
-        </button>
-
-        <button
-          type="button"
-          className="icon-btn"
-          onClick={() => setWishlistOpen(true)}
-          title="My wishlist"
-          aria-label="My wishlist"
-        >
-          <Heart size={16} strokeWidth={1.75} aria-hidden />
         </button>
 
         {authReady && (

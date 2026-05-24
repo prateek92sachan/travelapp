@@ -5,6 +5,7 @@ import { MAPBOX_TOKEN } from '../../services/config';
 import { reverseGeocodePlaceName, reverseGeocodeCity } from '../../services/googleMaps';
 import { useSearchStore } from '../../stores/searchStore';
 import { useMapStore } from '../../stores/mapStore';
+import { useWishlistStore } from '../../stores/wishlistStore';
 import { useTheme } from '../../hooks/useTheme';
 import MapControlsPanel from '../MapControlsPanel';
 import HotelInfoCard from '../HotelInfoCard';
@@ -51,7 +52,6 @@ export default function MapboxMapInner({
     actionsDisabled
   } = useMapData();
 
-  const refreshViewport = useMapStore((s) => s.refreshViewport);
   const transitOn = useMapStore((s) => s.transitOn);
   const setPlaceDisplay = useSearchStore((s) => s.setPlaceDisplay);
 
@@ -209,13 +209,13 @@ export default function MapboxMapInner({
     };
   }, [transitOn, anchorHotel?.placeId, anchorHotel?.lat, anchorHotel?.lng]);
 
-  // ---- moveend watcher: viewport refresh + reverse-geocode chip update ---
-  // Combines Google's ViewportWatcher and SearchHereWatcher into a single
-  // handler since Mapbox emits one moveend per gesture settle.
+  // ---- moveend watcher: reverse-geocode chip update only -----------------
+  // Matches GoogleMapInner's SearchHereWatcher exactly: on every map settle
+  // (after the first), reverse-geocode the centre to update the area/city
+  // display chip. Does NOT trigger a Places API refetch — the user must
+  // explicitly press "Search here" for that, just like the Google Maps version.
   const firstMoveSkippedRef = useRef(false);
-  const lastVpRef = useRef(null);
   const lastSearchHereRef = useRef(null);
-  const vpDebRef = useRef(null);
   const shDebRef = useRef(null);
   const shSeqRef = useRef(0);
   const nearbyRef = useRef(nearbyAnchor);
@@ -223,13 +223,11 @@ export default function MapboxMapInner({
 
   useEffect(() => {
     firstMoveSkippedRef.current = false;
-    lastVpRef.current = null;
     lastSearchHereRef.current = null;
   }, [center.lat, center.lng]);
 
   useEffect(() => {
     return () => {
-      if (vpDebRef.current) clearTimeout(vpDebRef.current);
       if (shDebRef.current) clearTimeout(shDebRef.current);
     };
   }, []);
@@ -246,59 +244,44 @@ export default function MapboxMapInner({
     const c = map.getCenter();
     const next = { lat: c.lat, lng: c.lng };
 
-    const bounds = map.getBounds();
-    let radiusMeters = 5000;
-    if (bounds) {
-      const ne = bounds.getNorthEast();
-      const sw = bounds.getSouthWest();
-      const diagKm = haversineKm(
-        { lat: ne.lat, lng: ne.lng },
-        { lat: sw.lat, lng: sw.lng }
-      );
-      radiusMeters = Math.max(1500, Math.round((diagKm / 2) * 1000));
-    }
-
-    const lastVp = lastVpRef.current;
-    if (!lastVp || haversineKm(lastVp, next) >= VIEWPORT_MIN_MOVE_KM) {
-      if (vpDebRef.current) clearTimeout(vpDebRef.current);
-      vpDebRef.current = setTimeout(() => {
-        if (nearbyRef.current) return;
-        lastVpRef.current = next;
-        refreshViewport({ lat: next.lat, lng: next.lng, radiusMeters });
-      }, VIEWPORT_DEBOUNCE_MS);
-    }
-
     const lastSh = lastSearchHereRef.current;
-    if (!lastSh || haversineKm(lastSh, next) >= VIEWPORT_MIN_MOVE_KM) {
-      if (shDebRef.current) clearTimeout(shDebRef.current);
-      shDebRef.current = setTimeout(async () => {
-        if (nearbyRef.current) return;
-        lastSearchHereRef.current = next;
-        const seq = ++shSeqRef.current;
-        const [name, locality] = await Promise.all([
-          reverseGeocodePlaceName({ lat: next.lat, lng: next.lng }).catch(() => null),
-          reverseGeocodeCity({ lat: next.lat, lng: next.lng }).catch(() => null)
-        ]);
-        if (seq !== shSeqRef.current) return;
-        if (!name && !locality) return;
-        let area = name || locality || '';
-        let city = '';
-        if (name) {
-          const parts = name.split(',').map((s) => s.trim()).filter(Boolean);
-          if (parts.length >= 2) {
-            area = parts[0];
-            city = parts[1];
-          } else if (parts.length === 1) {
-            area = parts[0];
-            if (locality && locality.toLowerCase() !== parts[0].toLowerCase()) {
-              city = locality;
-            }
+    if (lastSh && haversineKm(lastSh, next) < VIEWPORT_MIN_MOVE_KM) return;
+
+    if (shDebRef.current) clearTimeout(shDebRef.current);
+    shDebRef.current = setTimeout(async () => {
+      if (nearbyRef.current) return;
+      lastSearchHereRef.current = next;
+      const seq = ++shSeqRef.current;
+      const [name, locality] = await Promise.all([
+        reverseGeocodePlaceName({ lat: next.lat, lng: next.lng }).catch(() => null),
+        reverseGeocodeCity({ lat: next.lat, lng: next.lng }).catch(() => null)
+      ]);
+      if (seq !== shSeqRef.current) return;
+      if (!name && !locality) return;
+      let area = name || locality || '';
+      let city = '';
+      if (name) {
+        const parts = name.split(',').map((s) => s.trim()).filter(Boolean);
+        if (parts.length >= 2) {
+          area = parts[0];
+          city = parts[1];
+        } else if (parts.length === 1) {
+          area = parts[0];
+          if (locality && locality.toLowerCase() !== parts[0].toLowerCase()) {
+            city = locality;
           }
         }
-        setPlaceDisplay({ area, city });
-      }, VIEWPORT_DEBOUNCE_MS);
-    }
-  }, [refreshViewport, setPlaceDisplay]);
+      }
+      setPlaceDisplay({ area, city });
+      // Sync wishlist ghost city + viewport city label on every pan
+      if (locality) {
+        const ws = useWishlistStore.getState();
+        if (ws.ghostCity !== locality) ws.setGhostCity(locality);
+        const ms = useMapStore.getState();
+        if (ms.viewportCity !== locality) ms.setViewportCity(locality);
+      }
+    }, VIEWPORT_DEBOUNCE_MS);
+  }, [setPlaceDisplay]);
 
   return (
     <div className="map-container">

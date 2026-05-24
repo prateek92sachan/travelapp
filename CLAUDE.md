@@ -26,3 +26,4 @@
 ## Clarifications
 
 - **Always ask questions to get specific** before implementing any non-trivial feature or design change. Use the AskUserQuestion tool — short, targeted, max 4 questions per prompt. Do not assume library choice, data source, layout, interaction model, or scope. Only skip clarification for truly trivial work (single-line fix, typo, rename).
+- **When the task is confusing, ambiguous, or has multiple steps, ask before coding.** Ask about expected behavior in edge cases — what should happen on pan/zoom, navigation away, empty state, conflict with existing data, etc. Multi-step or stateful flows always need behavior questions before implementation. Better to ask 4 questions than write the wrong feature.

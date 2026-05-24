@@ -208,8 +208,14 @@ export function TripProvider({ children }) {
         }
       }
       setPlaceDisplay({ area, city });
+      // Sync wishlist ghost city + viewport city label on every viewport change
+      if (locality) {
+        const ws = useWishlistStore.getState();
+        if (ws.ghostCity !== locality) ws.setGhostCity(locality);
+        if (viewportCity !== locality) setViewportCity(locality);
+      }
     });
-  }, [viewportTarget?.lat, viewportTarget?.lng, setPlaceDisplay]);
+  }, [viewportTarget?.lat, viewportTarget?.lng, setPlaceDisplay, viewportCity, setViewportCity]);
 
   // Sync state -> URL (shareable)
   useEffect(() => {
