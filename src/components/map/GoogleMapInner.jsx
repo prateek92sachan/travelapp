@@ -22,7 +22,7 @@ import NearbyModeIndicator from './NearbyModeIndicator';
 import { useMapData } from './useMapData';
 
 export default function GoogleMapInner({
-  center, mapType, visibleCategories, toggleCategory, controlsOpen, onToggleControls
+  center, mapType, visibleCategories, toggleCategory
 }) {
   const { theme } = useTheme();
   const {
@@ -49,8 +49,6 @@ export default function GoogleMapInner({
         nearbyAnchor={nearbyAnchor}
         visibleCategories={visibleCategories}
         onToggleCategory={toggleCategory}
-        controlsOpen={controlsOpen}
-        onToggleControls={onToggleControls}
       />
       <Map
         defaultCenter={{ lat: center.lat, lng: center.lng }}
@@ -90,7 +88,7 @@ export default function GoogleMapInner({
         <SearchHereWatcher skip={!!nearbyAnchor} />
       </Map>
 
-      <MapControlsPanel open={controlsOpen} onToggle={onToggleControls} />
+      <MapControlsPanel />
       <NearbyModeIndicator />
       <HotelInfoCard />
     </div>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect } from 'react';
 import Card from './Card';
 import { useSearchStore } from '../stores/searchStore';
 import { useMapStore } from '../stores/mapStore';
@@ -14,19 +14,6 @@ export default function MapWidget() {
   // visibleCategories drives both map markers AND useTabQuery prefetch gating.
   const visibleCategories = useMapStore((s) => s.visibleCategories);
   const toggleCategory = useMapStore((s) => s.toggleCategory);
-
-  const [controlsOpen, setControlsOpen] = useState(false);
-  const toggleControls = useCallback(() => setControlsOpen((o) => !o), []);
-
-  useEffect(() => {
-    if (!controlsOpen) return;
-    function handlePointerDown(e) {
-      if (e.target.closest('.map-controls') || e.target.closest('.map-gear-btn')) return;
-      setControlsOpen(false);
-    }
-    document.addEventListener('pointerdown', handlePointerDown, true);
-    return () => document.removeEventListener('pointerdown', handlePointerDown, true);
-  }, [controlsOpen]);
 
   return (
     <Card className="map-card" bodyClassName="no-pad" expandable={false}>
@@ -48,8 +35,6 @@ export default function MapWidget() {
               mapType={mapType}
               visibleCategories={visibleCategories}
               toggleCategory={toggleCategory}
-              controlsOpen={controlsOpen}
-              onToggleControls={toggleControls}
             />
           );
         })()

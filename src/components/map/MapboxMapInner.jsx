@@ -34,7 +34,7 @@ function mapboxStyleFor(mapType, theme) {
 }
 
 export default function MapboxMapInner({
-  center, mapType, visibleCategories, toggleCategory, controlsOpen, onToggleControls
+  center, mapType, visibleCategories, toggleCategory
 }) {
   const { theme } = useTheme();
   const mapRef = useRef(null);
@@ -293,8 +293,6 @@ export default function MapboxMapInner({
         nearbyAnchor={nearbyAnchor}
         visibleCategories={visibleCategories}
         onToggleCategory={toggleCategory}
-        controlsOpen={controlsOpen}
-        onToggleControls={onToggleControls}
       />
       <Map
         ref={mapRef}
@@ -320,7 +318,7 @@ export default function MapboxMapInner({
             : null
         )}
       </Map>
-      <MapControlsPanel open={controlsOpen} onToggle={onToggleControls} />
+      <MapControlsPanel />
       <NearbyModeIndicator />
       <HotelInfoCard />
     </div>

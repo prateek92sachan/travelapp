@@ -4,7 +4,7 @@ import { CATEGORY_CONFIG, CATEGORY_KEYS } from './constants';
 
 export default function MapFloatingHeader({
   onSearchHere, onClearViewport, actionsDisabled, searchLoading, nearbyAnchor,
-  visibleCategories, onToggleCategory, controlsOpen, onToggleControls
+  visibleCategories, onToggleCategory
 }) {
   return (
     <div className="map-floating-header">
@@ -32,15 +32,6 @@ export default function MapFloatingHeader({
       <div className="map-floating-center" />
       <div className="map-header-right">
         <CategoryTogglePanel visible={visibleCategories} onToggle={onToggleCategory} />
-        <button
-          type="button"
-          className={`cat-toggle-btn map-gear-btn ${controlsOpen ? 'on' : 'off'}`}
-          onClick={onToggleControls}
-          title={controlsOpen ? 'Hide map controls' : 'Show map controls'}
-          aria-pressed={controlsOpen}
-        >
-          <Settings size={15} strokeWidth={1.75} aria-hidden />
-        </button>
       </div>
     </div>
   );
