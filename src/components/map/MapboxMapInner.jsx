@@ -300,16 +300,6 @@ export default function MapboxMapInner({
     }
   }, [refreshViewport, setPlaceDisplay]);
 
-  if (!MAPBOX_TOKEN) {
-    return (
-      <div className="map-container">
-        <div className="map-placeholder">
-          Mapbox token missing. Set VITE_MAPBOX_TOKEN in .env.
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="map-container">
       <MapFloatingHeader

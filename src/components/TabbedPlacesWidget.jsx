@@ -626,6 +626,15 @@ function WishlistBody({
   const addPlaceToWishlist = (place, category, listId = activeWishlistId) =>
     wAddPlace({ listId, place, category });
 
+  // Plan mode: skip the "+ Add city to Plan" empty state. When the current
+  // destination has no plan list yet, auto-create it and drop the user into
+  // Day 1 immediately. Saved mode keeps the manual prompt (per current ask).
+  useEffect(() => {
+    if (mode === 'plan' && !activeList && ghostCity) {
+      onPromoteGhost();
+    }
+  }, [mode, activeList, ghostCity, onPromoteGhost]);
+
   function handleAddSubmit(e) {
     e.preventDefault();
     if (!addForm.name.trim() || !activeWishlistId) return;
