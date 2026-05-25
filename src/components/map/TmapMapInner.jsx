@@ -1,8 +1,17 @@
+// Tmap renderer — a Mapbox GL map whose POI data is sourced entirely from
+// Mapbox (via placesProvider, which routes to tmapService when the provider is
+// 'tmap'). Structurally a sibling of MapboxMapInner; the deliberate difference
+// is that pan reverse-geocoding here calls the Mapbox geocoder directly (no
+// Google fallback) so Tmap stays 100% Google-free.
+
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Map } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { MAPBOX_TOKEN } from '../../services/config';
-import { reverseGeocodePlaceName, reverseGeocodeCity } from '../../services/locationService';
+import {
+  reverseGeocodePlaceNameMapbox,
+  reverseGeocodeCityMapbox
+} from '../../services/mapboxSearch';
 import { useSearchStore } from '../../stores/searchStore';
 import { useMapStore } from '../../stores/mapStore';
 import { useWishlistStore } from '../../stores/wishlistStore';
@@ -22,7 +31,7 @@ import MapFloatingHeader from './MapFloatingHeader';
 import NearbyModeIndicator from './NearbyModeIndicator';
 import { useMapData } from './useMapData';
 
-export default function MapboxMapInner({
+export default function TmapMapInner({
   center, mapType, visibleCategories, toggleCategory
 }) {
   const { theme } = useTheme();
@@ -103,7 +112,6 @@ export default function MapboxMapInner({
     map.easeTo({ center: [target.lng, target.lat] });
   }, [tabData, nearbyAnchor, viewportItems]);
 
-  // Reset density + move trackers when search center changes.
   useEffect(() => {
     densityFiredRef.current = false;
   }, [center.lat, center.lng]);
@@ -118,9 +126,7 @@ export default function MapboxMapInner({
   }, [anchorHotel?.placeId]);
 
   // ---- Style-bound layers: transit visibility + proximity ring ----------
-  // Both must re-apply after every style swap (style URL change blows away
-  // custom sources/layers). The sync function is idempotent so it can run
-  // freely on each styledata event.
+  // Re-applied on every styledata event (style swaps drop custom sources).
   useEffect(() => {
     const map = getMap();
     if (!map) return;
@@ -132,7 +138,6 @@ export default function MapboxMapInner({
     function apply() {
       if (!map.isStyleLoaded()) return;
 
-      // Transit visibility: toggle Mapbox style's built-in transit layers.
       const style = map.getStyle();
       if (style?.layers) {
         for (const layer of style.layers) {
@@ -141,17 +146,12 @@ export default function MapboxMapInner({
             (typeof layer.id === 'string' && layer.id.includes('transit'));
           if (isTransit) {
             try {
-              map.setLayoutProperty(
-                layer.id,
-                'visibility',
-                transitOn ? 'visible' : 'none'
-              );
+              map.setLayoutProperty(layer.id, 'visibility', transitOn ? 'visible' : 'none');
             } catch {}
           }
         }
       }
 
-      // Proximity ring: geodesic polygon around anchor hotel.
       if (anchorHotel && Number.isFinite(anchorHotel.lat) && Number.isFinite(anchorHotel.lng)) {
         const polygon = geodesicCirclePolygon(
           { lat: anchorHotel.lat, lng: anchorHotel.lng },
@@ -177,11 +177,7 @@ export default function MapboxMapInner({
             id: RING_LINE,
             type: 'line',
             source: RING_SRC,
-            paint: {
-              'line-color': '#14b8a6',
-              'line-width': 2,
-              'line-opacity': 0.8
-            }
+            paint: { 'line-color': '#14b8a6', 'line-width': 2, 'line-opacity': 0.8 }
           });
         }
       } else {
@@ -199,10 +195,9 @@ export default function MapboxMapInner({
   }, [transitOn, anchorHotel?.placeId, anchorHotel?.lat, anchorHotel?.lng]);
 
   // ---- moveend watcher: reverse-geocode chip update only -----------------
-  // Matches GoogleMapInner's SearchHereWatcher exactly: on every map settle
-  // (after the first), reverse-geocode the centre to update the area/city
-  // display chip. Does NOT trigger a Places API refetch — the user must
-  // explicitly press "Search here" for that, just like the Google Maps version.
+  // Pure Mapbox geocoder (no Google fallback) — the whole point of Tmap. Only
+  // updates the area/city display chip + ghost/viewport city; does NOT refetch
+  // places (user must press "Search here").
   const firstMoveSkippedRef = useRef(false);
   const lastSearchHereRef = useRef(null);
   const shDebRef = useRef(null);
@@ -242,8 +237,8 @@ export default function MapboxMapInner({
       lastSearchHereRef.current = next;
       const seq = ++shSeqRef.current;
       const [name, locality] = await Promise.all([
-        reverseGeocodePlaceName({ lat: next.lat, lng: next.lng }).catch(() => null),
-        reverseGeocodeCity({ lat: next.lat, lng: next.lng }).catch(() => null)
+        reverseGeocodePlaceNameMapbox({ lat: next.lat, lng: next.lng }).catch(() => null),
+        reverseGeocodeCityMapbox({ lat: next.lat, lng: next.lng }).catch(() => null)
       ]);
       if (seq !== shSeqRef.current) return;
       if (!name && !locality) return;
@@ -262,7 +257,6 @@ export default function MapboxMapInner({
         }
       }
       setPlaceDisplay({ area, city });
-      // Sync wishlist ghost city + viewport city label on every pan
       if (locality) {
         const ws = useWishlistStore.getState();
         if (ws.ghostCity !== locality) ws.setGhostCity(locality);

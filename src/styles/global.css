@@ -2735,12 +2735,24 @@ input { font-family: inherit; }
   box-shadow: 0 0 0 2px rgba(34, 34, 34, 0.08);
 }
 .plan-inline-input[type="time"] {
-  width: 82px;
+  /* appearance:none drops the native dropdown caret on Android Chrome (the
+     pseudo-element display:none below isn't enough there). With no caret the
+     field only needs room for "HH:MM", so it trims tight while staying
+     readable on one line. Tap still opens the picker. */
+  -webkit-appearance: none;
+  appearance: none;
+  width: 54px;
+  text-align: center;
   flex-shrink: 0;
+}
+.plan-inline-input[type="time"]::-webkit-calendar-picker-indicator {
+  display: none;
+  -webkit-appearance: none;
+  appearance: none;
 }
 .plan-inline-expense {
   flex: 1 1 auto;
-  min-width: 0;
+  min-width: 40px;
   max-width: 80px;
 }
 .plan-inline-sep {

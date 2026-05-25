@@ -8,11 +8,10 @@ import {
   useState
 } from 'react';
 import {
-  geocodeDestination,
   reverseGeocodeCity,
   reverseGeocodePlaceName
 } from '../services/locationService';
-import { clearViewportCache } from '../services/googleMaps';
+import { geocodeDestination, clearViewportCache } from '../services/placesProvider';
 import { fetchWeather, fetchLastYearWeather } from '../services/weather';
 import {
   saveRecentTrip,
@@ -88,6 +87,7 @@ export function TripProvider({ children }) {
     ]
   );
   const activeTab = useSearchStore((s) => s.activeTab);
+  const searchRadiusMeters = useSearchStore((s) => s.searchRadiusMeters);
   const loading = useSearchStore((s) => s.loading);
   const error = useSearchStore((s) => s.error);
   const selectedPlaceId = useSearchStore((s) => s.selectedPlaceId);
@@ -385,9 +385,13 @@ export function TripProvider({ children }) {
         queryClient.removeQueries({ queryKey: ['events'] });
         if (!preserveSelection) setSelectedHotelId(null);
 
-        // Exit nearby-mode and clear viewport overrides on new search
+        // Exit nearby-mode and clear viewport overrides on new search.
+        // viewportCity is a pan-exploration artifact — reset it too so the
+        // "Save to <city>" target doesn't keep showing the previously-panned
+        // city after searching somewhere new.
         setNearbyAnchor(null);
         setViewportTarget(null);
+        setViewportCity(null);
         // Wipe the API-level viewport cache too — old city's data is irrelevant
         clearViewportCache();
       }
@@ -450,8 +454,12 @@ export function TripProvider({ children }) {
         }
 
         // Phase 1 (in parallel): current weather + activities (default tab).
-        // fetchQuery both seeds the cache (so hook subscribers render) and
-        // returns the value so we can persist it to localStorage.
+        // On a silent refresh (mount restore / pin-tap reroute) we already have
+        // fresh cached activities seeded into the query cache, so use a long
+        // staleTime to serve them instead of re-billing a Text Search. An
+        // explicit search keeps staleTime 0 so the user gets fresh data.
+        // Weather is free (Open-Meteo), so always refetch it.
+        const placesStaleTime = silentRefresh ? 24 * 60 * 60 * 1000 : 0;
         const activitiesKey = tabQueryKey({
           tabKey: 'activities',
           destination: dest,
@@ -459,7 +467,9 @@ export function TripProvider({ children }) {
           lng: geo.lng,
           radiusMeters: radius
         });
-        const [w, acts] = await Promise.all([
+        // fetchQuery seeds the query cache (hook subscribers render); the
+        // persistence effect below mirrors the full tabData to localStorage.
+        await Promise.all([
           queryClient.fetchQuery({
             queryKey: weatherKey(weatherTarget),
             queryFn: () => fetchWeather(weatherTarget),
@@ -474,7 +484,7 @@ export function TripProvider({ children }) {
               lng: geo.lng,
               radiusMeters: radius
             }),
-            staleTime: 0
+            staleTime: placesStaleTime
           })
         ]);
         if (myReq !== requestSeq.current) return;
@@ -485,13 +495,6 @@ export function TripProvider({ children }) {
           // cloud call needed here anymore.
           saveRecentTrip({ destination: dest, date: dt, formattedAddress: geo.formattedAddress });
         }
-
-        // Persist Phase 1 immediately so restore shows activities + weather instantly.
-        setCachedPlaces(dest, dt, {
-          coords: geo,
-          tabData: { activities: acts, restaurants: null, nature: null, gems: null, hotels: null },
-          weather: w,
-        });
 
         // Phase 2: background — last-year weather + events only.
         // Tab prefetch removed (Fix 3): restaurants/nature/gems/hotels now
@@ -523,6 +526,21 @@ export function TripProvider({ children }) {
   );
 
 
+  // Mirror the full set of fetched tabs (with Wiki thumbnails already swapped
+  // in) + weather to localStorage whenever they change. On the next load,
+  // restore seeds these into the query cache so the silent refresh serves them
+  // instead of re-billing Places Text Search + Photo calls. Replaces the old
+  // activities-only write that left lazy tabs to refetch on every reload.
+  useEffect(() => {
+    if (!destination || !coords) return;
+    setCachedPlaces(destination, date, {
+      coords,
+      tabData,
+      weather,
+      searchRadiusMeters,
+    });
+  }, [destination, date, coords, tabData, weather, searchRadiusMeters]);
+
   // Auto-search on mount if URL had params.
   // If a fresh cache hit exists, pre-populate state immediately so the UI
   // renders instantly, then re-fetch silently in the background.
@@ -532,9 +550,12 @@ export function TripProvider({ children }) {
     const cached = getCachedPlaces(initialRef.current.destination, initialRef.current.date);
     if (cached) {
       setCoords(cached.coords);
-      // Compute the radius that would have been used (we didn't persist it).
-      // Falls back to default — the silent refresh that follows will overwrite it.
-      const radius = useSearchStore.getState().searchRadiusMeters;
+      // Use the persisted radius so the seeded query keys match what the silent
+      // refresh recomputes (same destination → same geocode → same radius).
+      // Without this the seed landed under the default-radius key and was
+      // orphaned, forcing a refetch. Falls back to the store default.
+      const radius = cached.searchRadiusMeters || useSearchStore.getState().searchRadiusMeters;
+      setSearchRadius(radius);
       // Seed tab query cache from localStorage so UI renders cached items instantly.
       if (cached.tabData && cached.coords) {
         TAB_KEYS.forEach((tabKey) => {

@@ -4,6 +4,7 @@ import { useSearchStore } from '../stores/searchStore';
 import { useMapStore } from '../stores/mapStore';
 import GoogleMapInner from './map/GoogleMapInner';
 import MapboxMapInner from './map/MapboxMapInner';
+import TmapMapInner from './map/TmapMapInner';
 import { MAPBOX_TOKEN } from '../services/config';
 
 export default function MapWidget() {
@@ -25,9 +26,13 @@ export default function MapWidget() {
         (() => {
           // Auto-fallback to Google when Mapbox token is unavailable so the
           // provider toggle pill stays reachable and the map never goes blank.
-          const useMapbox = mapProvider === 'mapbox' && !!MAPBOX_TOKEN;
-          const Inner = useMapbox ? MapboxMapInner : GoogleMapInner;
-          const effectiveProvider = useMapbox ? 'mapbox' : 'google';
+          // Tmap and Mapbox both need the token; Tmap additionally sources its
+          // POI data from Mapbox (see placesProvider).
+          const hasMapbox = !!MAPBOX_TOKEN;
+          const useTmap = mapProvider === 'tmap' && hasMapbox;
+          const useMapbox = mapProvider === 'mapbox' && hasMapbox;
+          const Inner = useTmap ? TmapMapInner : useMapbox ? MapboxMapInner : GoogleMapInner;
+          const effectiveProvider = useTmap ? 'tmap' : useMapbox ? 'mapbox' : 'google';
           return (
             <Inner
               key={`${effectiveProvider}-${coords.lat.toFixed(4)}-${coords.lng.toFixed(4)}`}

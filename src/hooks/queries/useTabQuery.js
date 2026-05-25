@@ -7,8 +7,9 @@ import {
   fetchTopRestaurants,
   fetchTopNatureUnique,
   fetchHiddenGems,
-  fetchTopHotels
-} from '../../services/googleMaps';
+  fetchTopHotels,
+  activeDataSource
+} from '../../services/placesProvider';
 import { enrichWithWiki } from '../../services/wikipedia';
 
 export const TAB_KEYS = ['activities', 'restaurants', 'nature', 'gems', 'hotels'];
@@ -21,8 +22,11 @@ const TAB_FETCHERS = {
   hotels: fetchTopHotels
 };
 
+// `src` ('g' | 'mb') tags the data source so Google- and Mapbox-sourced caches
+// never collide. 'tab' stays the first segment so removeQueries(['tab']) still
+// clears every provider's tabs.
 export const tabQueryKey = ({ tabKey, destination, lat, lng, radiusMeters }) =>
-  ['tab', tabKey, destination, lat, lng, radiusMeters];
+  ['tab', activeDataSource(), tabKey, destination, lat, lng, radiusMeters];
 
 // Builds the queryFn for a tab. Returns initial items immediately; fires
 // Wikipedia enrichment in the background and writes the enriched result

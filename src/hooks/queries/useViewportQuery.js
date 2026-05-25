@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchPlacesInViewport } from '../../services/googleMaps';
+import { fetchPlacesInViewport, activeDataSource } from '../../services/placesProvider';
 import { useMapStore } from '../../stores/mapStore';
 import { useSearchStore } from '../../stores/searchStore';
 import { queryClient } from '../../lib/queryClient';
@@ -8,6 +8,7 @@ export const VIEWPORT_CATEGORIES = ['activities', 'restaurants', 'nature', 'gems
 
 export const viewportQueryKey = ({ target, category }) => [
   'viewport',
+  activeDataSource(),
   target?.lat ?? null,
   target?.lng ?? null,
   target?.radiusMeters ?? null,

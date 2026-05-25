@@ -209,7 +209,7 @@ function TabbedPlacesWidget({ expandable = true }) {
 
   const saveListName = viewportCity
     ? shortListName(viewportCity)
-    : shortListName(activeWishlist?.name);
+    : shortListName(activeWishlist?.name || ghostCity);
 
   // Use selectedPlace directly — avoids the card vanishing when tab switches
   // before activeTabItems updates, or when data hasn't loaded yet.
@@ -881,6 +881,9 @@ const PlaceDetail = memo(function PlaceDetail({
 }) {
   const destination = useSearchStore((s) => s.destination);
   const isManual = place.placeId?.startsWith('manual-');
+  // Tmap is Google-free: its placeIds are Mapbox ids, so Google Place Details
+  // (places.googleapis.com) and the Gemini AI summary are both skipped here.
+  const isTmap = useMapStore((s) => s.mapProvider) === 'tmap';
 
   const [details, setDetails] = useState(null);
   const [wikiData, setWikiData] = useState(undefined);
@@ -898,9 +901,11 @@ const PlaceDetail = memo(function PlaceDetail({
     setDescExpanded(false);
     setDetailsLoading(true);
 
-    const p1 = fetchPlaceDetails(place.placeId)
-      .then((d) => { if (!cancelled) setDetails(d); })
-      .catch(() => { if (!cancelled) setDetails(null); });
+    const p1 = isTmap
+      ? Promise.resolve()
+      : fetchPlaceDetails(place.placeId)
+          .then((d) => { if (!cancelled) setDetails(d); })
+          .catch(() => { if (!cancelled) setDetails(null); });
 
     const p2 = place.wiki
       ? Promise.resolve(setWikiData(place.wiki))
@@ -908,14 +913,16 @@ const PlaceDetail = memo(function PlaceDetail({
           .then((w) => { if (!cancelled) setWikiData(w); })
           .catch(() => { if (!cancelled) setWikiData(null); });
 
-    const p3 = fetchPlaceDescription(place)
-      .then((d) => { if (!cancelled) setGeminiDesc(d); })
-      .catch(() => { if (!cancelled) setGeminiDesc(null); });
+    const p3 = isTmap
+      ? Promise.resolve()
+      : fetchPlaceDescription(place)
+          .then((d) => { if (!cancelled) setGeminiDesc(d); })
+          .catch(() => { if (!cancelled) setGeminiDesc(null); });
 
     Promise.all([p1, p2, p3]).then(() => { if (!cancelled) setDetailsLoading(false); });
 
     return () => { cancelled = true; };
-  }, [place.placeId, destination]);
+  }, [place.placeId, destination, isTmap]);
 
   const wikiExtract = wikiData?.extract ?? place.wiki?.extract ?? null;
   const wikiUrl = wikiData?.url ?? place.wiki?.url ?? null;

@@ -8,11 +8,18 @@
 // title, since "Eiffel Tower" might be the page but "the eiffel tower"
 // or "Tour Eiffel" might not redirect cleanly.
 
+import { loadCache, makeSaver } from '../utils/persistentCache';
+
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
 const WIKI_SEARCH =
   'https://en.wikipedia.org/w/api.php?action=opensearch&format=json&origin=*&limit=1&search=';
 
-const WIKI_CACHE = new Map();
+// Persisted for a day. Beyond saving free Wikipedia calls, this keeps the
+// place→thumbnail mapping warm so enrichWithWiki keeps swapping in free Wiki
+// images on reload instead of falling back to billed Google photos.
+const WIKI_TTL_MS = 24 * 60 * 60 * 1000;
+const WIKI_CACHE = loadCache('wiki', WIKI_TTL_MS);
+const persistWiki = makeSaver('wiki', { max: 500 });
 
 /**
  * Look up a place on Wikipedia, return { extract, url } or null.
@@ -55,6 +62,7 @@ export async function fetchWikiSummary(placeName, context = '') {
       thumbnail: sum.thumbnail?.source || null
     };
     WIKI_CACHE.set(query, result);
+    persistWiki(WIKI_CACHE);
     return result;
   } catch {
     return null;

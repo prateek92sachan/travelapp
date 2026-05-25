@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchPlacesNearPoint } from '../../services/googleMaps';
+import { fetchPlacesNearPoint, activeDataSource } from '../../services/placesProvider';
 import { useMapStore } from '../../stores/mapStore';
 import { useSearchStore } from '../../stores/searchStore';
 import { queryClient } from '../../lib/queryClient';
@@ -8,6 +8,7 @@ export const NEARBY_CATEGORIES = ['activities', 'restaurants', 'nature', 'gems']
 
 export const nearbyQueryKey = ({ anchor, category }) => [
   'nearby',
+  activeDataSource(),
   anchor?.placeId ?? null,
   anchor?.lat ?? null,
   anchor?.lng ?? null,

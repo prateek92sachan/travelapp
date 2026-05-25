@@ -54,7 +54,10 @@ export const useSearchStore = create((set, get) => ({
   // Select a place across tabs. Optionally switches to `category` first so
   // React batches both updates and the detail card finds the place in the
   // correct tab. Dispatches DOM events for map pan + drawer open.
-  selectPlace: (place, category) => {
+  // `pan` (default true) controls the map-pan side effect. Pin taps pass
+  // pan:false — the place is already on screen, so they only open the detail
+  // card without yanking the map around.
+  selectPlace: (place, category, { pan = true } = {}) => {
     if (!place) {
       const currentTab = get().activeTab;
       set({ selectedPlace: null, selectedPlaceId: null });
@@ -71,7 +74,7 @@ export const useSearchStore = create((set, get) => ({
       activeTab: category || get().activeTab,
       selectedPlaceId: place.placeId
     });
-    if (category) {
+    if (category && pan) {
       window.dispatchEvent(
         new CustomEvent('travelapp:focusLocation', {
           detail: {

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 const PROVIDER_KEY = 'mapProvider';
-const VALID_PROVIDERS = new Set(['google', 'mapbox']);
+const VALID_PROVIDERS = new Set(['google', 'mapbox', 'tmap']);
 
 function readStoredProvider() {
   try {

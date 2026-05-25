@@ -183,7 +183,9 @@ export async function fetchPlacePredictionsMapbox(input, { sessionToken, signal 
     `&access_token=${MAPBOX_TOKEN}` +
     `&session_token=${sessionToken}` +
     `&language=en` +
-    `&types=place,locality,region,country,district,address,poi` +
+    // Destination search = cities/regions only. Dropping address+poi stops
+    // businesses ("Dehradun Public School") from burying the actual city.
+    `&types=place,locality,region,country,district` +
     `&limit=8`;
   const { signal: combined, clear } = timeoutSignal(signal);
   try {

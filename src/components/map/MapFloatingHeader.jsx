@@ -63,6 +63,15 @@ function ProviderToggle() {
       >
         Mapbox
       </button>
+      <button
+        type="button"
+        className={`provider-toggle-btn${provider === 'tmap' ? ' active' : ''}`}
+        onClick={() => setProvider('tmap')}
+        aria-pressed={provider === 'tmap'}
+        title="Use Tmap (pure Mapbox data)"
+      >
+        Tmap
+      </button>
     </div>
   );
 }

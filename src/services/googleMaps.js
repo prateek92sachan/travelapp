@@ -2,6 +2,7 @@
 // All calls go through the JS SDK once the map is loaded; geocoding uses REST.
 
 import { GOOGLE_MAPS_KEY } from './config';
+import { loadCache, makeSaver, clearCache } from '../utils/persistentCache';
 
 /**
  * Geocode a destination string -> { lat, lng, formattedAddress, name, types, isCountry }.
@@ -59,10 +60,12 @@ export async function geocodeDestination(destination) {
 // Quantize coords to ~110m buckets so near-identical calls hit the cache.
 // TTL 30 min — these names don't change quickly. See milestone Fix 5.
 
-const REV_GEO_CACHE = new Map();
 const REV_GEO_TTL_MS = 30 * 60 * 1000;
 const REV_GEO_BUCKET = 0.001; // ≈ 110 m at the equator
 const REV_GEO_MAX = 200;
+// Hydrated from localStorage so reverse-geocode labels survive a reload.
+const REV_GEO_CACHE = loadCache('revgeo', REV_GEO_TTL_MS);
+const persistRevGeo = makeSaver('revgeo', { max: REV_GEO_MAX, getTime: (v) => v.time });
 
 function revGeoKey(kind, lat, lng) {
   const q = (n) => (Math.round(n / REV_GEO_BUCKET) * REV_GEO_BUCKET).toFixed(3);
@@ -86,6 +89,7 @@ function revGeoSet(kind, lat, lng, value) {
   if (REV_GEO_CACHE.size > REV_GEO_MAX) {
     REV_GEO_CACHE.delete(REV_GEO_CACHE.keys().next().value);
   }
+  persistRevGeo(REV_GEO_CACHE);
 }
 
 // Reverse geocode a lat/lng to a city name (locality or admin level 2).
@@ -555,7 +559,11 @@ export function directionsUrl({ lat, lng, name }) {
 
 // ---- Place Details (New) -------------------------------------------------
 
-const PLACE_DETAILS_CACHE = new Map();
+// Place details rarely change; persist for a day so reopening a place after a
+// reload is free instead of re-billing the Enterprise+Atmosphere SKU.
+const PLACE_DETAILS_TTL_MS = 24 * 60 * 60 * 1000;
+const PLACE_DETAILS_CACHE = loadCache('details', PLACE_DETAILS_TTL_MS);
+const persistDetails = makeSaver('details', { max: 300 });
 const detailsInFlight = new Map();
 
 const PRICE_LEVEL_MAP = {
@@ -576,12 +584,14 @@ export async function fetchPlaceDetails(placeId) {
   if (PLACE_DETAILS_CACHE.has(placeId)) return PLACE_DETAILS_CACHE.get(placeId);
   if (detailsInFlight.has(placeId)) return detailsInFlight.get(placeId);
 
+  // No 'photos' field: the detail card renders only the list thumbnail
+  // (place.photoUrl). The extra gallery photos were fetched but never shown,
+  // so requesting them only inflated the SKU tier for nothing.
   const fields = [
     'currentOpeningHours',
     'internationalPhoneNumber',
     'websiteUri',
     'reviews',
-    'photos',
     'priceLevel',
     'editorialSummary'
   ].join(',');
@@ -613,14 +623,11 @@ export async function fetchPlaceDetails(placeId) {
           rating: r.rating ?? null,
           text: r.text?.text || '',
           time: r.relativePublishTimeDescription || ''
-        })),
-        extraPhotos: (data.photos || []).slice(1, 4).map(
-          (p) =>
-            `https://places.googleapis.com/v1/${p.name}/media?maxHeightPx=400&maxWidthPx=600&key=${GOOGLE_MAPS_KEY}`
-        )
+        }))
       };
 
       PLACE_DETAILS_CACHE.set(placeId, details);
+      persistDetails(PLACE_DETAILS_CACHE);
       return details;
     } finally {
       detailsInFlight.delete(placeId);
@@ -641,8 +648,12 @@ export async function fetchPlaceDetails(placeId) {
 // tiny pan deltas all hit the same bucket. TTL 10 min — long enough that
 // re-pans feel snappy, short enough that "data freshness" stays believable.
 
-const VIEWPORT_CACHE = new Map();
-const VIEWPORT_TTL_MS = 10 * 60 * 1000; // 10 minutes
+// 60 min: panned-area attraction lists are static enough that an hour-old
+// result is fine, and the longer window lets persisted entries survive a reload
+// (the prior 10 min made cross-session reuse near-useless).
+const VIEWPORT_TTL_MS = 60 * 60 * 1000;
+const VIEWPORT_CACHE = loadCache('viewport', VIEWPORT_TTL_MS);
+const persistViewport = makeSaver('viewport', { max: 100, getTime: (v) => v.time });
 const COORD_BUCKET = 0.01; // ≈ 1.1 km at the equator
 
 function quantize(n) {
@@ -752,6 +763,7 @@ export async function fetchPlacesInViewport({
       if (VIEWPORT_CACHE.size > 100) {
         VIEWPORT_CACHE.delete(VIEWPORT_CACHE.keys().next().value);
       }
+      persistViewport(VIEWPORT_CACHE);
       return data;
     } finally {
       inFlight.delete(key);
@@ -786,6 +798,7 @@ export async function fetchPlacesNearPoint({
 export function clearViewportCache() {
   VIEWPORT_CACHE.clear();
   inFlight.clear();
+  clearCache('viewport');
 }
 
 // ---- Places Autocomplete (New) -------------------------------------------
@@ -831,14 +844,14 @@ export async function fetchPlacePredictions(input, { sessionToken, signal } = {}
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': GOOGLE_MAPS_KEY
       },
-      // NOTE: We deliberately omit `includedPrimaryTypes` here. Google Places
-      // Autocomplete (New) requires all values to come from a single type
-      // table (Table A or Table B). Mixing locality/country/tourist_attraction
-      // returns HTTP 400 INVALID_ARGUMENT. Letting Google rank by relevance
-      // gives the best results in practice.
+      // Destination search = cities/regions only. `(regions)` is a single
+      // allowed collection token (locality / admin areas / country), so it
+      // doesn't hit the "mixed type tables → 400" problem that listing
+      // individual types would. Keeps businesses/POIs out of the suggestions.
       body: JSON.stringify({
         input: trimmed,
-        sessionToken
+        sessionToken,
+        includedPrimaryTypes: ['(regions)']
       }),
       signal
     });
