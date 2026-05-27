@@ -3,6 +3,7 @@ import { fetchPlacesNearPoint, activeDataSource } from '../../services/placesPro
 import { useMapStore } from '../../stores/mapStore';
 import { useSearchStore } from '../../stores/searchStore';
 import { queryClient } from '../../lib/queryClient';
+import { backfillPhotosWithWiki } from '../../services/wikipedia';
 
 export const NEARBY_CATEGORIES = ['activities', 'restaurants', 'nature', 'gems'];
 
@@ -21,6 +22,7 @@ export const nearbyQueryKey = ({ anchor, category }) => [
 export function useNearbyQuery({ anchor, category }) {
   const visible = useMapStore((s) => s.visibleCategories?.[category]);
   const activeTab = useSearchStore((s) => s.activeTab);
+  const destination = useSearchStore((s) => s.destination);
   const queryKey = nearbyQueryKey({ anchor, category });
   const alreadyCached = !!queryClient.getQueryData(queryKey);
   const demanded = !!visible || activeTab === category || alreadyCached;
@@ -32,13 +34,24 @@ export function useNearbyQuery({ anchor, category }) {
     NEARBY_CATEGORIES.includes(category);
   return useQuery({
     queryKey,
-    queryFn: () =>
-      fetchPlacesNearPoint({
+    // Same free-Wikipedia photo backfill as the viewport path — photoless
+    // (Tmap/Mapbox) nearby places get an image so pin-saves aren't blank.
+    queryFn: async () => {
+      const items = await fetchPlacesNearPoint({
         lat: anchor.lat,
         lng: anchor.lng,
         radiusKm: 2,
         category
-      }),
+      });
+      if (Array.isArray(items) && items.length) {
+        backfillPhotosWithWiki(items, destination)
+          .then((enriched) => {
+            if (enriched !== items) queryClient.setQueryData(queryKey, enriched);
+          })
+          .catch((err) => console.warn('Wiki photo backfill failed:', err));
+      }
+      return items;
+    },
     enabled,
     staleTime: Infinity
   });

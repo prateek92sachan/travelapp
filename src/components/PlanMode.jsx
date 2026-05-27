@@ -281,10 +281,10 @@ export default function PlanMode({ list }) {
           liveDataByCategory={liveDataByCategory}
           tabLoading={tabLoading}
           fetchTabIfNeeded={fetchTabIfNeeded}
-          isSavedFn={(id) => isWishlisted(id)}
+          isSavedFn={(place) => isWishlisted(place)}
           onToggleSave={(place, category) => {
-            if (isWishlisted(place.placeId)) {
-              removePlaceFromWishlist(place.placeId);
+            if (isWishlisted(place)) {
+              removePlaceFromWishlist(place);
             } else {
               addPlaceToWishlist(place, category);
             }
@@ -308,10 +308,10 @@ export default function PlanMode({ list }) {
           hotels={liveDataByCategory.hotels || []}
           hotelsLoading={!!tabLoading?.hotels}
           fetchTabIfNeeded={fetchTabIfNeeded}
-          isSavedFn={(id) => isWishlisted(id)}
+          isSavedFn={(place) => isWishlisted(place)}
           onToggleSave={(place) => {
-            if (isWishlisted(place.placeId)) {
-              removePlaceFromWishlist(place.placeId);
+            if (isWishlisted(place)) {
+              removePlaceFromWishlist(place);
             } else {
               addPlaceToWishlist(place, 'hotels');
             }
@@ -720,7 +720,7 @@ function PlacePickerModalImpl({
                 place={p}
                 category={activePill}
                 planned={plannedSet.has(p.placeId)}
-                saved={isSavedFn(p.placeId)}
+                saved={isSavedFn(p)}
                 onToggleSave={() => onToggleSave(p, activePill)}
                 onPick={() => onPick({ place: p, category: activePill })}
                 showCategoryChip
@@ -807,7 +807,7 @@ function HotelPickerModalImpl({
                   place={p}
                   category="hotels"
                   selected={selected}
-                  saved={isSavedFn(p.placeId)}
+                  saved={isSavedFn(p)}
                   onToggleSave={() => onToggleSave(p)}
                   onPick={() => onPick({ place: p })}
                 />

@@ -3,6 +3,7 @@ import {
   createListForDestinationMode,
   deleteWishlist,
   findListByCityMode,
+  findMatchingItem,
   getWishlist,
   isPlaceWishlisted,
   pruneEmptyListsExceptDestination,
@@ -140,12 +141,17 @@ export const useWishlistStore = create((set, get) => {
       return listId;
     },
 
-    removePlace: ({ listId, placeId }) => {
-      if (!listId || !placeId) return get().wishlist;
-      const next = removeWishlistPlace({ listId, placeId });
+    removePlace: ({ listId, placeId, place }) => {
+      const query = place ?? placeId;
+      if (!listId || !query) return get().wishlist;
+      // Resolve the matched item BEFORE removal so cloud sync deletes the
+      // item's actual stored placeId (may differ from the query's provider id).
+      const prevList = findList(get().wishlist, listId);
+      const target = findMatchingItem(prevList?.items, query);
+      const next = removeWishlistPlace({ listId, placeId, place });
       set({ wishlist: next });
       const list = findList(next, listId);
-      if (list) emit('removeItem', list, placeId);
+      if (list && target) emit('removeItem', list, target.placeId);
       return next;
     },
 

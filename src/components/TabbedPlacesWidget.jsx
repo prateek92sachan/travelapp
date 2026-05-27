@@ -354,10 +354,10 @@ function TabbedPlacesWidget({ expandable = true }) {
                   index={i}
                   selected={selectedPlaceId === a.placeId}
                   onSelect={() => selectPlace(a)}
-                  saved={isWishlisted(a.placeId, effectiveListId)}
+                  saved={isWishlisted(a, effectiveListId)}
                   activeListName={saveListName}
                   onSave={() => addPlaceToSmartWishlist(a, activeTab)}
-                  onRemove={() => removePlaceFromWishlist(a.placeId, effectiveListId)}
+                  onRemove={() => removePlaceFromWishlist(a, effectiveListId)}
                 />
               ))}
             </div>
@@ -369,10 +369,10 @@ function TabbedPlacesWidget({ expandable = true }) {
         <PlaceDetail
           place={selected}
           onClose={() => selectPlace(null)}
-          saved={isWishlisted(selected.placeId, effectiveListId)}
+          saved={isWishlisted(selected, effectiveListId)}
           activeListName={saveListName}
           onSave={() => addPlaceToSmartWishlist(selected, activeTab)}
-          onRemove={() => removePlaceFromWishlist(selected.placeId, effectiveListId)}
+          onRemove={() => removePlaceFromWishlist(selected, effectiveListId)}
         />
       )}
     </>

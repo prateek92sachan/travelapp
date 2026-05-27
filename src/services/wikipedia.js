@@ -72,6 +72,35 @@ export async function fetchWikiSummary(placeName, context = '') {
 }
 
 /**
+ * Backfill ONLY photoless places with a free Wikipedia thumbnail.
+ *
+ * Used by the viewport / nearby map paths, which (unlike the tab path) don't
+ * run full enrichment. Tmap (pure-Mapbox) places arrive with photoUrl=null, so
+ * saving them from a map pin produced a blank card. This fills that gap with a
+ * free Wiki image — no Google Photos call.
+ *
+ * Places that already have a photoUrl are returned UNTOUCHED — no Wikipedia
+ * lookup, no photo swap — so Google/Mapbox-sourced results keep their native
+ * photos and incur zero extra work. Returns the original array reference when
+ * nothing changed, so callers can skip a needless cache write.
+ */
+export async function backfillPhotosWithWiki(places, context = '') {
+  if (!Array.isArray(places) || places.length === 0) return places;
+  if (!places.some((p) => !p?.photoUrl)) return places;
+  let changed = false;
+  const out = await Promise.all(
+    places.map(async (p) => {
+      if (p?.photoUrl) return p;
+      const wiki = await fetchWikiSummary(p.name, context);
+      if (!wiki) return p;
+      changed = true;
+      return wiki.thumbnail ? { ...p, wiki, photoUrl: wiki.thumbnail } : { ...p, wiki };
+    })
+  );
+  return changed ? out : places;
+}
+
+/**
  * Enrich a list of places with Wikipedia summaries in parallel.
  * Returns the same array shape with optional .wiki property added.
  * Never fails the whole batch on a single missing article.

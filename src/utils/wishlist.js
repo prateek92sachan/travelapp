@@ -20,6 +20,45 @@ function makeId() {
   return 'wl-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+// ---- Cross-provider place identity ----------------------------------------
+// Google and Mapbox (Tmap) return different ids for the same physical place,
+// so a place saved under one provider wasn't recognized under the other
+// (heart showed un-saved; could double-save). We bridge that locally — no API
+// calls, no added cost — by treating two places as the same when their ids
+// match OR their normalized names match AND they sit within MATCH_RADIUS_M.
+const MATCH_RADIUS_M = 75;
+
+function normName(s) {
+  return (s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+// Equirectangular metre approximation — accurate enough at the ~75m scale and
+// far cheaper than full haversine.
+function metersBetween(a, b) {
+  if (![a?.lat, a?.lng, b?.lat, b?.lng].every(Number.isFinite)) return Infinity;
+  const R = 6371000;
+  const toRad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * toRad;
+  const dLng = (b.lng - a.lng) * toRad * Math.cos(((a.lat + b.lat) / 2) * toRad);
+  return Math.sqrt(dLat * dLat + dLng * dLng) * R;
+}
+
+export function isSamePlace(item, place) {
+  if (!item || !place) return false;
+  if (item.placeId && place.placeId && item.placeId === place.placeId) return true;
+  if (!item.name || !place.name) return false;
+  if (normName(item.name) !== normName(place.name)) return false;
+  return metersBetween(item, place) <= MATCH_RADIUS_M;
+}
+
+// Find the saved item matching a query. `query` may be a place object (uses the
+// cross-provider heuristic) or a bare placeId string (exact match only).
+export function findMatchingItem(items, query) {
+  if (!Array.isArray(items) || !query) return null;
+  if (typeof query === 'string') return items.find((p) => p.placeId === query) || null;
+  return items.find((p) => isSamePlace(p, query)) || null;
+}
+
 function hasPlanContent(plan) {
   if (!plan || !Array.isArray(plan.itinerary)) return false;
   for (const day of plan.itinerary) {
@@ -242,29 +281,35 @@ export function saveWishlistPlace({ listId, place, category }) {
 
   const lists = wishlist.lists.map((list) => {
     if (list.id !== listId) return list;
-    const existingIndex = list.items.findIndex((p) => p.placeId === place.placeId);
-    const items =
-      existingIndex >= 0
-        ? list.items.map((p, i) => (i === existingIndex ? { ...p, ...item } : p))
-        : [...list.items, item];
+    // Match cross-provider so re-saving the same place under a different
+    // provider updates the existing entry. Keep the stored item's original
+    // placeId so its own remove/select paths stay stable.
+    const existing = findMatchingItem(list.items, place);
+    const items = existing
+      ? list.items.map((p) => (p === existing ? { ...p, ...item, placeId: p.placeId } : p))
+      : [...list.items, item];
     return { ...list, items, updatedAt: Date.now() };
   });
 
   return persist({ ...wishlist, activeListId: listId, lists });
 }
 
-export function removeWishlistPlace({ listId, placeId }) {
-  if (!listId || !placeId) return getWishlist();
+export function removeWishlistPlace({ listId, placeId, place }) {
+  const query = place ?? placeId;
+  if (!listId || !query) return getWishlist();
   const wishlist = getWishlist();
-  const lists = wishlist.lists.map((list) =>
-    list.id === listId
-      ? {
-          ...list,
-          items: list.items.filter((p) => p.placeId !== placeId),
-          updatedAt: Date.now(),
-        }
-      : list
-  );
+  const lists = wishlist.lists.map((list) => {
+    if (list.id !== listId) return list;
+    // Resolve cross-provider so a place can be un-saved from whichever provider
+    // is active, even if it was saved under the other provider's id.
+    const match = findMatchingItem(list.items, query);
+    if (!match) return list;
+    return {
+      ...list,
+      items: list.items.filter((p) => p !== match),
+      updatedAt: Date.now(),
+    };
+  });
   return persist({ ...wishlist, lists });
 }
 
@@ -276,10 +321,11 @@ export function deleteWishlist(listId) {
   return persist({ ...wishlist, activeListId, lists });
 }
 
-export function isPlaceWishlisted(wishlist, listId, placeId) {
-  if (!listId || !placeId) return false;
+// `query` may be a place object (cross-provider match) or a placeId string.
+export function isPlaceWishlisted(wishlist, listId, query) {
+  if (!listId || !query) return false;
   const list = wishlist.lists?.find((item) => item.id === listId);
-  return list?.items?.some((p) => p.placeId === placeId) || false;
+  return !!findMatchingItem(list?.items, query);
 }
 
 export function replaceWishlist(data) {
