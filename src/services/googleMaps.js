@@ -428,7 +428,7 @@ export async function fetchTopPOIs({ destination, lat, lng, radiusMeters = 20000
 
 // ---- Public: tab-specific fetchers ----------------------------------------
 
-export async function fetchTopActivities({ destination, lat, lng, radiusMeters = 20000, limit = 10 }) {
+export async function fetchTopActivities({ destination, lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchAndRank({
     textQuery: `things to do and activities in ${destination}`,
     lat,
@@ -439,7 +439,7 @@ export async function fetchTopActivities({ destination, lat, lng, radiusMeters =
   });
 }
 
-export async function fetchTopRestaurants({ destination, lat, lng, radiusMeters = 20000, limit = 10 }) {
+export async function fetchTopRestaurants({ destination, lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchAndRank({
     textQuery: `best restaurants in ${destination}`,
     lat,
@@ -450,7 +450,7 @@ export async function fetchTopRestaurants({ destination, lat, lng, radiusMeters 
   });
 }
 
-export async function fetchTopNatureUnique({ destination, lat, lng, radiusMeters = 20000, limit = 10 }) {
+export async function fetchTopNatureUnique({ destination, lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchAndRank({
     textQuery: `natural attractions parks scenic spots and unique places in ${destination}`,
     lat,
@@ -466,10 +466,8 @@ export async function fetchTopNatureUnique({ destination, lat, lng, radiusMeters
  * layer (toggleable) — NOT a tab. Hotels live exclusively on the map so
  * users can spatially evaluate "where should I stay relative to attractions?"
  *
- * Higher fetch limit (15) than other categories — map can comfortably
- * display more lodging markers without losing density.
  */
-export async function fetchTopHotels({ destination, lat, lng, radiusMeters = 20000, limit = 15 }) {
+export async function fetchTopHotels({ destination, lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchAndRank({
     textQuery: `top hotels in ${destination}`,
     lat,
@@ -498,7 +496,7 @@ export async function fetchTopHotels({ destination, lat, lng, radiusMeters = 200
  * bound filters out the obvious top-of-mind spots that would already be in
  * the Activities tab.
  */
-export async function fetchHiddenGems({ destination, lat, lng, radiusMeters = 20000, limit = 10 }) {
+export async function fetchHiddenGems({ destination, lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchAndRank({
     textQuery: `hidden gems and lesser-known places in ${destination}`,
     lat,
@@ -557,87 +555,6 @@ export function directionsUrl({ lat, lng, name }) {
   return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
 }
 
-// ---- Place Details (New) -------------------------------------------------
-
-// Place details rarely change; persist for a day so reopening a place after a
-// reload is free instead of re-billing the Enterprise+Atmosphere SKU.
-const PLACE_DETAILS_TTL_MS = 24 * 60 * 60 * 1000;
-const PLACE_DETAILS_CACHE = loadCache('details', PLACE_DETAILS_TTL_MS);
-const persistDetails = makeSaver('details', { max: 300 });
-const detailsInFlight = new Map();
-
-const PRICE_LEVEL_MAP = {
-  PRICE_LEVEL_FREE: 'Free',
-  PRICE_LEVEL_INEXPENSIVE: '₹',
-  PRICE_LEVEL_MODERATE: '₹₹',
-  PRICE_LEVEL_EXPENSIVE: '₹₹₹',
-  PRICE_LEVEL_VERY_EXPENSIVE: '₹₹₹₹'
-};
-
-/**
- * Fetch rich details for a single place: hours, phone, website, reviews,
- * price level, editorial summary, and extra photos.
- * Results are cached for the session; concurrent calls for the same placeId
- * share one in-flight request instead of racing.
- */
-export async function fetchPlaceDetails(placeId) {
-  if (PLACE_DETAILS_CACHE.has(placeId)) return PLACE_DETAILS_CACHE.get(placeId);
-  if (detailsInFlight.has(placeId)) return detailsInFlight.get(placeId);
-
-  // No 'photos' field: the detail card renders only the list thumbnail
-  // (place.photoUrl). The extra gallery photos were fetched but never shown,
-  // so requesting them only inflated the SKU tier for nothing.
-  const fields = [
-    'currentOpeningHours',
-    'internationalPhoneNumber',
-    'websiteUri',
-    'reviews',
-    'priceLevel',
-    'editorialSummary'
-  ].join(',');
-
-  const promise = (async () => {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000);
-      const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
-        headers: {
-          'X-Goog-Api-Key': GOOGLE_MAPS_KEY,
-          'X-Goog-FieldMask': fields
-        },
-        signal: controller.signal
-      }).finally(() => clearTimeout(timer));
-
-      if (!res.ok) throw new Error(`Place details ${res.status}`);
-      const data = await res.json();
-
-      const details = {
-        openNow: data.currentOpeningHours?.openNow ?? null,
-        weekdayHours: data.currentOpeningHours?.weekdayDescriptions || [],
-        phone: data.internationalPhoneNumber || null,
-        website: data.websiteUri || null,
-        priceLevel: PRICE_LEVEL_MAP[data.priceLevel] || null,
-        editorialSummary: data.editorialSummary?.text || null,
-        reviews: (data.reviews || []).slice(0, 3).map((r) => ({
-          author: r.authorAttribution?.displayName || 'Anonymous',
-          rating: r.rating ?? null,
-          text: r.text?.text || '',
-          time: r.relativePublishTimeDescription || ''
-        }))
-      };
-
-      PLACE_DETAILS_CACHE.set(placeId, details);
-      persistDetails(PLACE_DETAILS_CACHE);
-      return details;
-    } finally {
-      detailsInFlight.delete(placeId);
-    }
-  })();
-
-  detailsInFlight.set(placeId, promise);
-  return promise;
-}
-
 // ---- Viewport-aware fetching with cache -----------------------------------
 //
 // When the user pans/zooms the map, we fetch places for the new viewport.
@@ -648,10 +565,11 @@ export async function fetchPlaceDetails(placeId) {
 // tiny pan deltas all hit the same bucket. TTL 10 min — long enough that
 // re-pans feel snappy, short enough that "data freshness" stays believable.
 
-// 60 min: panned-area attraction lists are static enough that an hour-old
-// result is fine, and the longer window lets persisted entries survive a reload
-// (the prior 10 min made cross-session reuse near-useless).
-const VIEWPORT_TTL_MS = 60 * 60 * 1000;
+// 7 days: panned-area place lists barely change (name/coords/rating are slow),
+// and we no longer fetch live hours/open-now, so staleness is low-risk. A long
+// window maximises cross-session reuse — each cache hit is one billed Places
+// Search call avoided.
+const VIEWPORT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const VIEWPORT_CACHE = loadCache('viewport', VIEWPORT_TTL_MS);
 const persistViewport = makeSaver('viewport', { max: 100, getTime: (v) => v.time });
 const COORD_BUCKET = 0.01; // ≈ 1.1 km at the equator

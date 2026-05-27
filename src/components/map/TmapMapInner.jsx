@@ -228,7 +228,7 @@ export default function TmapMapInner({
       >
         {CATEGORY_KEYS.map((cat) =>
           visibleCategories[cat]
-            ? markersForCat(cat).slice(0, 7).map((poi, i) => (
+            ? markersForCat(cat).slice(0, 5).map((poi, i) => (
                 <POIMarker
                   key={poi.placeId}
                   poi={poi}

@@ -28,8 +28,8 @@ const CATEGORY_CANONICAL = {
   hotels: 'hotel'
 };
 
-// ---- Viewport cache (mirrors googleMaps.js: bbox/category key, 60min TTL) ---
-const VIEWPORT_TTL_MS = 60 * 60 * 1000;
+// ---- Viewport cache (mirrors googleMaps.js: bbox/category key, 7-day TTL) ---
+const VIEWPORT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const VIEWPORT_CACHE = loadCache('tmap-viewport', VIEWPORT_TTL_MS);
 const persistViewport = makeSaver('tmap-viewport', { max: 100, getTime: (v) => v.time });
 const inFlight = new Map();
@@ -142,23 +142,23 @@ async function fetchCategory({ category, lat, lng, radiusMeters = 20000, limit =
 // `destination` is accepted for signature parity but unused — Mapbox browse is
 // driven by proximity + bbox, not a text query.
 
-export function fetchTopActivities({ lat, lng, radiusMeters = 20000, limit = 10 }) {
+export function fetchTopActivities({ lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchCategory({ category: 'activities', lat, lng, radiusMeters, limit });
 }
 
-export function fetchTopRestaurants({ lat, lng, radiusMeters = 20000, limit = 10 }) {
+export function fetchTopRestaurants({ lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchCategory({ category: 'restaurants', lat, lng, radiusMeters, limit });
 }
 
-export function fetchTopNatureUnique({ lat, lng, radiusMeters = 20000, limit = 10 }) {
+export function fetchTopNatureUnique({ lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchCategory({ category: 'nature', lat, lng, radiusMeters, limit });
 }
 
-export function fetchHiddenGems({ lat, lng, radiusMeters = 20000, limit = 10 }) {
+export function fetchHiddenGems({ lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchCategory({ category: 'gems', lat, lng, radiusMeters, limit });
 }
 
-export function fetchTopHotels({ lat, lng, radiusMeters = 20000, limit = 15 }) {
+export function fetchTopHotels({ lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchCategory({ category: 'hotels', lat, lng, radiusMeters, limit });
 }
 

@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Compass, Utensils, Leaf, Gem, BedDouble, Heart, Navigation, Phone, Globe, Pencil, Trash2 } from 'lucide-react';
+import { Compass, Utensils, Leaf, Gem, BedDouble, Heart, Navigation, Pencil, Trash2 } from 'lucide-react';
 import Card from './Card';
 import { useSearchStore } from '../stores/searchStore';
 import { useMapStore } from '../stores/mapStore';
@@ -13,9 +13,8 @@ import {
 } from '../stores/wishlistStore';
 import { useTabQuery, TAB_KEYS } from '../hooks/queries/useTabQuery';
 import { useViewportQuery } from '../hooks/queries/useViewportQuery';
-import { directionsUrl, fetchPlaceDetails } from '../services/googleMaps';
-import { fetchWikiSummary } from '../services/wikipedia';
-import { fetchPlaceDescription } from '../services/gemini';
+import { directionsUrl } from '../services/googleMaps';
+import { fetchWikiSummary, isWikiMatch } from '../services/wikipedia';
 import { SavedPlaceCard } from './WishlistPanel';
 import PlanMode from './PlanMode';
 import { formatCount, formatPrice } from '../utils/format';
@@ -342,7 +341,7 @@ function TabbedPlacesWidget({ expandable = true }) {
             </div>
           ) : (
             <div className="activity-list">
-              {activeTabItems.map((a, i) => (
+              {activeTabItems.slice(0, 5).map((a, i) => (
                 <PlaceRow
                   key={a.placeId}
                   place={a}
@@ -862,10 +861,6 @@ const PlaceRow = memo(function PlaceRow({
   prev.activeListName === next.activeListName
 );
 
-function hostnameOf(url) {
-  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
-}
-
 const PlaceDetail = memo(function PlaceDetail({
   place,
   onClose,
@@ -876,53 +871,33 @@ const PlaceDetail = memo(function PlaceDetail({
 }) {
   const destination = useSearchStore((s) => s.destination);
   const isManual = place.placeId?.startsWith('manual-');
-  // Tmap is Google-free: its placeIds are Mapbox ids, so Google Place Details
-  // (places.googleapis.com) and the Gemini AI summary are both skipped here.
-  const isTmap = useMapStore((s) => s.mapProvider) === 'tmap';
 
-  const [details, setDetails] = useState(null);
   const [wikiData, setWikiData] = useState(undefined);
-  const [geminiDesc, setGeminiDesc] = useState(null);
-  const [detailsLoading, setDetailsLoading] = useState(!isManual);
-  const [hoursOpen, setHoursOpen] = useState(false);
   const [descExpanded, setDescExpanded] = useState(false);
 
+  // Descriptions come from Wikipedia only (free) — no Google Place Details or
+  // Gemini calls. The fetch is debounced 300ms so skimming through places
+  // (rapid pin/row clicks) doesn't fire a lookup for each one passed over.
   useEffect(() => {
-    if (isManual) return;
-    let cancelled = false;
-    setDetails(null);
-    setWikiData(undefined);
-    setGeminiDesc(null);
+    if (isManual) return undefined;
     setDescExpanded(false);
-    setDetailsLoading(true);
-
-    const p1 = isTmap
-      ? Promise.resolve()
-      : fetchPlaceDetails(place.placeId)
-          .then((d) => { if (!cancelled) setDetails(d); })
-          .catch(() => { if (!cancelled) setDetails(null); });
-
-    const p2 = place.wiki
-      ? Promise.resolve(setWikiData(place.wiki))
-      : fetchWikiSummary(place.name, destination)
-          .then((w) => { if (!cancelled) setWikiData(w); })
-          .catch(() => { if (!cancelled) setWikiData(null); });
-
-    const p3 = isTmap
-      ? Promise.resolve()
-      : fetchPlaceDescription(place)
-          .then((d) => { if (!cancelled) setGeminiDesc(d); })
-          .catch(() => { if (!cancelled) setGeminiDesc(null); });
-
-    Promise.all([p1, p2, p3]).then(() => { if (!cancelled) setDetailsLoading(false); });
-
-    return () => { cancelled = true; };
-  }, [place.placeId, destination, isTmap]);
+    if (place.wiki) {
+      setWikiData(place.wiki);
+      return undefined;
+    }
+    setWikiData(undefined);
+    let cancelled = false;
+    const t = setTimeout(() => {
+      fetchWikiSummary(place.name, destination)
+        .then((w) => { if (!cancelled) setWikiData(isWikiMatch(place, w) ? w : null); })
+        .catch(() => { if (!cancelled) setWikiData(null); });
+    }, 300);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [place.placeId, place.wiki, place.name, destination, isManual]);
 
   const wikiExtract = wikiData?.extract ?? place.wiki?.extract ?? null;
   const wikiUrl = wikiData?.url ?? place.wiki?.url ?? null;
-  // Gemini primary → wiki full extract fallback → editorial summary last resort
-  const richDescription = geminiDesc || wikiExtract || details?.editorialSummary || null;
+  const richDescription = wikiExtract;
 
   const toggleWishlist = () => { if (saved) onRemove(); else onSave(); };
 
@@ -946,36 +921,13 @@ const PlaceDetail = memo(function PlaceDetail({
         </div>
       )}
 
-      {/* Open now badge + hours */}
-      {detailsLoading ? (
-        <div className="skeleton" style={{ height: 22, width: 72, margin: '10px 0 0', borderRadius: 999 }} />
-      ) : details?.openNow != null && (
-        <div className="detail-open-row">
-          <span className={`detail-open-badge ${details.openNow ? 'open' : 'closed'}`}>
-            {details.openNow ? 'Open now' : 'Closed'}
-          </span>
-          {details.weekdayHours.length > 0 && (
-            <button type="button" className="detail-hours-toggle" onClick={() => setHoursOpen((v) => !v)}>
-              {hoursOpen ? 'Hide hours' : 'See hours'}
-            </button>
-          )}
-        </div>
-      )}
-      {hoursOpen && details?.weekdayHours.length > 0 && (
-        <div className="detail-hours">
-          {details.weekdayHours.map((h, i) => (
-            <div key={i} className="detail-hour-row">{h}</div>
-          ))}
-        </div>
-      )}
-
-      {/* Description */}
+      {/* Description (Wikipedia) */}
       {richDescription && (
         <ExpandableDescription
           text={richDescription}
           expanded={descExpanded}
           onToggle={() => setDescExpanded((v) => !v)}
-          wikiUrl={!geminiDesc ? wikiUrl : null}
+          wikiUrl={wikiUrl}
         />
       )}
 
@@ -987,7 +939,7 @@ const PlaceDetail = memo(function PlaceDetail({
         </div>
         <div className="detail-stat">
           <div className="k">Cost</div>
-          <div className="v">{formatPrice(details?.priceLevel || place.estCost)}</div>
+          <div className="v">{formatPrice(place.estCost)}</div>
         </div>
         {place.rating != null && (
           <div className="detail-stat">
@@ -1003,46 +955,6 @@ const PlaceDetail = memo(function PlaceDetail({
           </div>
         )}
       </div>
-
-      {/* Contact: phone + website */}
-      {!detailsLoading && (details?.phone || details?.website) && (
-        <div className="detail-contact">
-          {details.phone && (
-            <a href={`tel:${details.phone}`} className="detail-contact-item">
-              <Phone size={12} strokeWidth={2} aria-hidden />
-              {details.phone}
-            </a>
-          )}
-          {details.website && (
-            <a href={details.website} target="_blank" rel="noopener noreferrer" className="detail-contact-item">
-              <Globe size={12} strokeWidth={2} aria-hidden />
-              {hostnameOf(details.website)}
-            </a>
-          )}
-        </div>
-      )}
-
-      {/* Reviews */}
-      {details?.reviews?.length > 0 && (
-        <div className="detail-reviews">
-          <div className="detail-section-label">Reviews</div>
-          {details.reviews.map((r, i) => (
-            <div key={i} className="detail-review">
-              <div className="detail-review-header">
-                <span className="detail-review-author">{r.author}</span>
-                <span className="detail-review-meta">
-                  {'★'.repeat(Math.floor(r.rating ?? 0))}{r.time ? ` · ${r.time}` : ''}
-                </span>
-              </div>
-              {r.text && (
-                <p className="detail-review-text">
-                  {r.text.length > 200 ? r.text.slice(0, 200) + '…' : r.text}
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
 
       <div className="detail-actions">
         <button type="button" className={`btn detail-save-btn ${saved ? 'btn-ghost' : ''}`} onClick={toggleWishlist}>
