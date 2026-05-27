@@ -2735,20 +2735,38 @@ input { font-family: inherit; }
   box-shadow: 0 0 0 2px rgba(34, 34, 34, 0.08);
 }
 .plan-inline-input[type="time"] {
-  /* appearance:none drops the native dropdown caret on Android Chrome (the
-     pseudo-element display:none below isn't enough there). With no caret the
-     field only needs room for "HH:MM", so it trims tight while staying
-     readable on one line. Tap still opens the picker. */
-  -webkit-appearance: none;
-  appearance: none;
-  width: 54px;
-  text-align: center;
+  /* Only shown while actively editing a time (tap-to-edit), so a normal native
+     control with room for the full "HH:MM" is fine here. */
+  width: 84px;
   flex-shrink: 0;
 }
-.plan-inline-input[type="time"]::-webkit-calendar-picker-indicator {
-  display: none;
-  -webkit-appearance: none;
-  appearance: none;
+/* Tap-to-edit display: time + price render as plain tappable text, no boxes,
+   so values never clip in the narrow session row. */
+.plan-time-text,
+.plan-price-text {
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  margin: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+.plan-price-text {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.plan-time-text:hover,
+.plan-price-text:hover,
+.plan-time-text:focus-visible,
+.plan-price-text:focus-visible {
+  background: var(--bg-elevated);
+  outline: none;
 }
 .plan-inline-expense {
   flex: 1 1 auto;

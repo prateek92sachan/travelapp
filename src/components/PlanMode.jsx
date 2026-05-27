@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, useCallback, useEffect } from 'react';
+import { memo, useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   BedDouble,
@@ -444,6 +444,19 @@ function DayBlock({
 
 function SessionCard({ session, place, onChange, onRemove }) {
   const mins = durationMinutes(session.startTime, session.endTime);
+  // Tap-to-edit: time + expense render as plain text (no clipping boxes) and
+  // only swap to an input on tap. 'start' | 'end' | 'expense' | null.
+  const [editing, setEditing] = useState(null);
+  const editRef = useRef(null);
+
+  useEffect(() => {
+    const el = editRef.current;
+    if (!el) return;
+    el.focus();
+    // Open the native time picker straight away when editing a time field.
+    if (editing === 'start' || editing === 'end') el.showPicker?.();
+  }, [editing]);
+
   return (
     <div className="plan-session">
       {place?.photoUrl && (
@@ -471,31 +484,70 @@ function SessionCard({ session, place, onChange, onRemove }) {
           <div className="plan-session-addr">{place.address}</div>
         )}
         <div className="plan-session-row">
-          <input
-            className="plan-inline-input"
-            type="time"
-            value={session.startTime}
-            onChange={(e) => onChange({ startTime: e.target.value })}
-            aria-label="Start time"
-          />
+          {editing === 'start' ? (
+            <input
+              ref={editRef}
+              className="plan-inline-input"
+              type="time"
+              value={session.startTime}
+              onChange={(e) => onChange({ startTime: e.target.value })}
+              onBlur={() => setEditing(null)}
+              aria-label="Start time"
+            />
+          ) : (
+            <button
+              type="button"
+              className="plan-time-text"
+              onClick={() => setEditing('start')}
+              aria-label={`Start time ${session.startTime || 'not set'}, tap to edit`}
+            >
+              {session.startTime || '--:--'}
+            </button>
+          )}
           <span className="plan-inline-sep">→</span>
-          <input
-            className="plan-inline-input"
-            type="time"
-            value={session.endTime}
-            onChange={(e) => onChange({ endTime: e.target.value })}
-            aria-label="End time"
-          />
+          {editing === 'end' ? (
+            <input
+              ref={editRef}
+              className="plan-inline-input"
+              type="time"
+              value={session.endTime}
+              onChange={(e) => onChange({ endTime: e.target.value })}
+              onBlur={() => setEditing(null)}
+              aria-label="End time"
+            />
+          ) : (
+            <button
+              type="button"
+              className="plan-time-text"
+              onClick={() => setEditing('end')}
+              aria-label={`End time ${session.endTime || 'not set'}, tap to edit`}
+            >
+              {session.endTime || '--:--'}
+            </button>
+          )}
           <span className="plan-inline-dur">{formatDuration(mins)}</span>
-          <input
-            className="plan-inline-input plan-inline-expense"
-            type="text"
-            inputMode="decimal"
-            placeholder="₹"
-            value={session.expense || ''}
-            onChange={(e) => onChange({ expense: e.target.value })}
-            aria-label="Expense"
-          />
+          {editing === 'expense' ? (
+            <input
+              ref={editRef}
+              className="plan-inline-input plan-inline-expense"
+              type="text"
+              inputMode="decimal"
+              placeholder="₹"
+              value={session.expense || ''}
+              onChange={(e) => onChange({ expense: e.target.value })}
+              onBlur={() => setEditing(null)}
+              aria-label="Expense"
+            />
+          ) : (
+            <button
+              type="button"
+              className="plan-price-text"
+              onClick={() => setEditing('expense')}
+              aria-label={`Expense ${session.expense ? `₹${session.expense}` : 'not set'}, tap to edit`}
+            >
+              {session.expense ? `₹${session.expense}` : '₹—'}
+            </button>
+          )}
         </div>
       </div>
     </div>
