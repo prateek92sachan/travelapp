@@ -17,18 +17,15 @@ import { useMapStore } from '../../stores/mapStore';
 import { useWishlistStore } from '../../stores/wishlistStore';
 import { useTheme } from '../../hooks/useTheme';
 import MapControlsPanel from '../MapControlsPanel';
-import HotelInfoCard from '../HotelInfoCard';
 import { haversineKm } from '../../utils/geo';
 import {
   CATEGORY_KEYS,
-  PROXIMITY_KM,
   VIEWPORT_DEBOUNCE_MS,
   VIEWPORT_MIN_MOVE_KM
 } from './constants';
-import { densestCentroid, geodesicCirclePolygon } from './helpers';
+import { densestCentroid } from './helpers';
 import { mapboxStyleFor, POIMarker } from './mapboxShared';
 import MapFloatingHeader from './MapFloatingHeader';
-import NearbyModeIndicator from './NearbyModeIndicator';
 import { useMapData } from './useMapData';
 
 export default function TmapMapInner({
@@ -39,10 +36,8 @@ export default function TmapMapInner({
   const {
     loading,
     selectedPlaceId,
-    nearbyAnchor,
     viewportItems,
     tabData,
-    anchorHotel,
     markersForCat,
     onPinTap,
     handleSearchHereClick,
@@ -61,11 +56,10 @@ export default function TmapMapInner({
 
   // ---- Center sync: pan on prop change + travelapp:panToCity event --------
   useEffect(() => {
-    if (nearbyAnchor) return;
     const map = getMap();
     if (!map) return;
     map.easeTo({ center: [center.lng, center.lat], zoom: 12 });
-  }, [center.lat, center.lng, nearbyAnchor]);
+  }, [center.lat, center.lng]);
 
   useEffect(() => {
     function onReset(e) {
@@ -95,7 +89,7 @@ export default function TmapMapInner({
   // ---- Density centering: fire once after pins resolve -------------------
   const densityFiredRef = useRef(false);
   useEffect(() => {
-    if (densityFiredRef.current || nearbyAnchor || viewportItems) return;
+    if (densityFiredRef.current || viewportItems) return;
     const all = [];
     for (const cat of CATEGORY_KEYS) {
       const items = tabData?.[cat] || [];
@@ -110,34 +104,20 @@ export default function TmapMapInner({
     if (!map) return;
     densityFiredRef.current = true;
     map.easeTo({ center: [target.lng, target.lat] });
-  }, [tabData, nearbyAnchor, viewportItems]);
+  }, [tabData, viewportItems]);
 
   useEffect(() => {
     densityFiredRef.current = false;
   }, [center.lat, center.lng]);
 
-  // ---- Proximity ring: pan + zoom on anchor change ----------------------
-  useEffect(() => {
-    if (!anchorHotel) return;
-    const map = getMap();
-    if (!map) return;
-    map.easeTo({ center: [anchorHotel.lng, anchorHotel.lat] });
-    if (map.getZoom() < 13) map.setZoom(13);
-  }, [anchorHotel?.placeId]);
-
-  // ---- Style-bound layers: transit visibility + proximity ring ----------
-  // Re-applied on every styledata event (style swaps drop custom sources).
+  // ---- Style-bound layers: transit visibility --------------------------
+  // Re-applied on every styledata event (style swaps drop custom layer state).
   useEffect(() => {
     const map = getMap();
     if (!map) return;
-
-    const RING_SRC = 'travelapp-proximity-ring';
-    const RING_FILL = 'travelapp-proximity-ring-fill';
-    const RING_LINE = 'travelapp-proximity-ring-line';
 
     function apply() {
       if (!map.isStyleLoaded()) return;
-
       const style = map.getStyle();
       if (style?.layers) {
         for (const layer of style.layers) {
@@ -151,40 +131,6 @@ export default function TmapMapInner({
           }
         }
       }
-
-      if (anchorHotel && Number.isFinite(anchorHotel.lat) && Number.isFinite(anchorHotel.lng)) {
-        const polygon = geodesicCirclePolygon(
-          { lat: anchorHotel.lat, lng: anchorHotel.lng },
-          PROXIMITY_KM
-        );
-        const data = { type: 'Feature', geometry: polygon, properties: {} };
-        const src = map.getSource(RING_SRC);
-        if (!src) {
-          map.addSource(RING_SRC, { type: 'geojson', data });
-        } else {
-          src.setData(data);
-        }
-        if (!map.getLayer(RING_FILL)) {
-          map.addLayer({
-            id: RING_FILL,
-            type: 'fill',
-            source: RING_SRC,
-            paint: { 'fill-color': '#14b8a6', 'fill-opacity': 0.08 }
-          });
-        }
-        if (!map.getLayer(RING_LINE)) {
-          map.addLayer({
-            id: RING_LINE,
-            type: 'line',
-            source: RING_SRC,
-            paint: { 'line-color': '#14b8a6', 'line-width': 2, 'line-opacity': 0.8 }
-          });
-        }
-      } else {
-        if (map.getLayer(RING_FILL)) map.removeLayer(RING_FILL);
-        if (map.getLayer(RING_LINE)) map.removeLayer(RING_LINE);
-        if (map.getSource(RING_SRC)) map.removeSource(RING_SRC);
-      }
     }
 
     apply();
@@ -192,7 +138,7 @@ export default function TmapMapInner({
     return () => {
       map.off('styledata', apply);
     };
-  }, [transitOn, anchorHotel?.placeId, anchorHotel?.lat, anchorHotel?.lng]);
+  }, [transitOn]);
 
   // ---- moveend watcher: reverse-geocode chip update only -----------------
   // Pure Mapbox geocoder (no Google fallback) — the whole point of Tmap. Only
@@ -202,8 +148,6 @@ export default function TmapMapInner({
   const lastSearchHereRef = useRef(null);
   const shDebRef = useRef(null);
   const shSeqRef = useRef(0);
-  const nearbyRef = useRef(nearbyAnchor);
-  useEffect(() => { nearbyRef.current = nearbyAnchor; }, [nearbyAnchor]);
 
   useEffect(() => {
     firstMoveSkippedRef.current = false;
@@ -223,7 +167,6 @@ export default function TmapMapInner({
       firstMoveSkippedRef.current = true;
       return;
     }
-    if (nearbyRef.current) return;
 
     const c = map.getCenter();
     const next = { lat: c.lat, lng: c.lng };
@@ -233,7 +176,6 @@ export default function TmapMapInner({
 
     if (shDebRef.current) clearTimeout(shDebRef.current);
     shDebRef.current = setTimeout(async () => {
-      if (nearbyRef.current) return;
       lastSearchHereRef.current = next;
       const seq = ++shSeqRef.current;
       const [name, locality] = await Promise.all([
@@ -273,7 +215,6 @@ export default function TmapMapInner({
         onClearViewport={clearViewportItems}
         actionsDisabled={actionsDisabled}
         searchLoading={loading}
-        nearbyAnchor={nearbyAnchor}
         visibleCategories={visibleCategories}
         onToggleCategory={toggleCategory}
       />
@@ -293,7 +234,6 @@ export default function TmapMapInner({
                   poi={poi}
                   index={i}
                   category={cat}
-                  anchor={anchorHotel}
                   isSelected={selectedPlaceId === poi.placeId}
                   onSelect={onPinTap}
                 />
@@ -302,8 +242,6 @@ export default function TmapMapInner({
         )}
       </Map>
       <MapControlsPanel />
-      <NearbyModeIndicator />
-      <HotelInfoCard />
     </div>
   );
 }

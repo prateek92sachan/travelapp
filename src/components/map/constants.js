@@ -1,6 +1,5 @@
 import { Compass, Utensils, Leaf, Gem, BedDouble } from 'lucide-react';
 
-export const PROXIMITY_KM = 2;
 export const VIEWPORT_DEBOUNCE_MS = 600;
 export const VIEWPORT_MIN_MOVE_KM = 0.5;
 export const DENSITY_RADIUS_KM = 3;

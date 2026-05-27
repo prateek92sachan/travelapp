@@ -35,8 +35,6 @@ export const useMapStore = create((set, get) => ({
   },
 
   // Map-mode state (where the map is "focused")
-  selectedHotelId: null, // null = no proximity ring
-  nearbyAnchor: null, // hotel that anchors nearby-mode; null = off
   viewportTarget: null, // { lat, lng, radiusMeters, bounds } | null
   viewportCity: null, // reverse-geocoded city name from last pan
 
@@ -63,30 +61,12 @@ export const useMapStore = create((set, get) => ({
       visibleCategories: { ...s.visibleCategories, [cat]: !s.visibleCategories[cat] }
     })),
 
-  setSelectedHotelId: (v) => set({ selectedHotelId: v }),
-  setNearbyAnchor: (v) => set({ nearbyAnchor: v }),
   setViewportTarget: (v) => set({ viewportTarget: v }),
   setViewportCity: (v) => set({ viewportCity: v }),
 
-  // Click hotel → enter nearby mode (or exit if null passed).
-  selectHotel: (hotel) =>
-    set({
-      selectedHotelId: hotel?.placeId ?? null,
-      nearbyAnchor: hotel || null
-    }),
-
-  // Exit nearby mode + clear viewport overrides so user lands on city tabData.
-  exitNearbyMode: () =>
-    set({
-      selectedHotelId: null,
-      nearbyAnchor: null,
-      viewportTarget: null
-    }),
-
-  // Pan refresh — sets viewport target. Guarded against nearby-mode by caller.
+  // Pan refresh — sets viewport target.
   refreshViewport: ({ lat, lng, radiusMeters, bounds }) => {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    if (get().nearbyAnchor) return;
     set({
       viewportTarget: {
         lat,

@@ -7,18 +7,15 @@ import { useMapStore } from '../../stores/mapStore';
 import { useWishlistStore } from '../../stores/wishlistStore';
 import { useTheme } from '../../hooks/useTheme';
 import MapControlsPanel from '../MapControlsPanel';
-import HotelInfoCard from '../HotelInfoCard';
 import { haversineKm } from '../../utils/geo';
 import {
   CATEGORY_CONFIG,
   CATEGORY_KEYS,
-  PROXIMITY_KM,
   VIEWPORT_DEBOUNCE_MS,
   VIEWPORT_MIN_MOVE_KM
 } from './constants';
 import { densestCentroid } from './helpers';
 import MapFloatingHeader from './MapFloatingHeader';
-import NearbyModeIndicator from './NearbyModeIndicator';
 import { useMapData } from './useMapData';
 
 export default function GoogleMapInner({
@@ -28,10 +25,8 @@ export default function GoogleMapInner({
   const {
     loading,
     selectedPlaceId,
-    nearbyAnchor,
     viewportItems,
     tabData,
-    anchorHotel,
     markersForCat,
     onPinTap,
     handleSearchHereClick,
@@ -46,7 +41,6 @@ export default function GoogleMapInner({
         onClearViewport={clearViewportItems}
         actionsDisabled={actionsDisabled}
         searchLoading={loading}
-        nearbyAnchor={nearbyAnchor}
         visibleCategories={visibleCategories}
         onToggleCategory={toggleCategory}
       />
@@ -71,7 +65,6 @@ export default function GoogleMapInner({
                   poi={poi}
                   index={i}
                   category={cat}
-                  anchor={anchorHotel}
                   isSelected={selectedPlaceId === poi.placeId}
                   onSelect={onPinTap}
                 />
@@ -80,25 +73,21 @@ export default function GoogleMapInner({
         )}
 
         <MapTypeSync mapType={mapType} />
-        <CenterSync lat={center.lat} lng={center.lng} skip={!!nearbyAnchor} />
-        <DensityCentering tabData={tabData} skip={!!nearbyAnchor || !!viewportItems} />
+        <CenterSync lat={center.lat} lng={center.lng} />
+        <DensityCentering tabData={tabData} skip={!!viewportItems} />
         <FocusListener />
         <TransitLayer />
-        <ProximityRing center={anchorHotel} radiusKm={PROXIMITY_KM} />
-        <SearchHereWatcher skip={!!nearbyAnchor} />
+        <SearchHereWatcher />
       </Map>
 
       <MapControlsPanel />
-      <NearbyModeIndicator />
-      <HotelInfoCard />
     </div>
   );
 }
 
 // ---- Markers (memoized for performance) ----------------------------------
 
-function POIMarker({ poi, index, anchor, isSelected, onSelect, category }) {
-  const isOutsideRing = anchor ? haversineKm(anchor, poi) > PROXIMITY_KM : false;
+function POIMarker({ poi, index, isSelected, onSelect, category }) {
   const color = CATEGORY_CONFIG[category]?.color || '#ef4444';
   const onClick = useCallback(() => onSelect(poi, category), [onSelect, poi, category]);
 
@@ -113,7 +102,6 @@ function POIMarker({ poi, index, anchor, isSelected, onSelect, category }) {
         className={`map-marker-poi${isSelected ? ' selected' : ''}`}
         style={{
           background: color,
-          opacity: isOutsideRing ? 0.35 : 1,
           boxShadow: isSelected
             ? `0 0 0 3px white, 0 0 0 5px ${color}`
             : '0 1px 4px rgba(0,0,0,0.4)'
@@ -130,7 +118,6 @@ const MemoPOIMarker = memo(POIMarker, (prev, next) => {
     prev.poi.placeId === next.poi.placeId &&
     prev.index === next.index &&
     prev.category === next.category &&
-    prev.anchor?.placeId === next.anchor?.placeId &&
     prev.isSelected === next.isSelected &&
     prev.onSelect === next.onSelect
   );
@@ -147,13 +134,13 @@ function MapTypeSync({ mapType }) {
   return null;
 }
 
-function CenterSync({ lat, lng, skip }) {
+function CenterSync({ lat, lng }) {
   const map = useMap();
   useEffect(() => {
-    if (!map || skip) return;
+    if (!map) return;
     map.panTo({ lat, lng });
     map.setZoom(12);
-  }, [map, lat, lng, skip]);
+  }, [map, lat, lng]);
 
   useEffect(() => {
     if (!map) return;
@@ -219,41 +206,17 @@ function TransitLayer() {
   return null;
 }
 
-function ProximityRing({ center, radiusKm }) {
-  const map = useMap();
-  useEffect(() => {
-    if (!map || !center || !window.google?.maps?.Circle) return undefined;
-    const circle = new window.google.maps.Circle({
-      map,
-      center: { lat: center.lat, lng: center.lng },
-      radius: radiusKm * 1000,
-      strokeColor: '#14b8a6',
-      strokeOpacity: 0.8,
-      strokeWeight: 2,
-      fillColor: '#14b8a6',
-      fillOpacity: 0.08,
-      clickable: false
-    });
-    map.panTo({ lat: center.lat, lng: center.lng });
-    if (map.getZoom() < 13) map.setZoom(13);
-    return () => circle.setMap(null);
-  }, [map, center, radiusKm]);
-  return null;
-}
-
 // ---- Search-here watcher (mounted inside <Map>) -------------------------
 // On every map idle (after the first), reverse-geocode the current map center
 // to a neighborhood/city name and update placeArea/placeCity. Does NOT write
 // to `destination` — that would trigger a tab refetch on every pan.
-function SearchHereWatcher({ skip }) {
+function SearchHereWatcher() {
   const map = useMap();
   const firstIdleSkippedRef = useRef(false);
   const requestSeqRef = useRef(0);
-  const skipRef = useRef(skip);
   const debounceRef = useRef(null);
   const lastResolvedRef = useRef(null);
   const setPlaceDisplay = useSearchStore((s) => s.setPlaceDisplay);
-  useEffect(() => { skipRef.current = skip; }, [skip]);
 
   useEffect(() => {
     if (!map) return undefined;
@@ -263,7 +226,6 @@ function SearchHereWatcher({ skip }) {
         firstIdleSkippedRef.current = true;
         return;
       }
-      if (skipRef.current) return;
 
       const c = map.getCenter();
       if (!c) return;
@@ -274,7 +236,6 @@ function SearchHereWatcher({ skip }) {
 
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(async () => {
-        if (skipRef.current) return;
         lastResolvedRef.current = next;
         const { lat, lng } = next;
 

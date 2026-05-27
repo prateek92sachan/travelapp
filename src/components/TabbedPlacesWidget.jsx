@@ -12,7 +12,6 @@ import {
   resolveActiveForMode,
 } from '../stores/wishlistStore';
 import { useTabQuery, TAB_KEYS } from '../hooks/queries/useTabQuery';
-import { useNearbyQuery } from '../hooks/queries/useNearbyQuery';
 import { useViewportQuery } from '../hooks/queries/useViewportQuery';
 import { directionsUrl, fetchPlaceDetails } from '../services/googleMaps';
 import { fetchWikiSummary } from '../services/wikipedia';
@@ -85,7 +84,6 @@ function TabbedPlacesWidget({ expandable = true }) {
   const loading = useSearchStore((s) => s.loading);
 
   // Map domain (mode overrides drive activeTabItems priority)
-  const nearbyAnchor = useMapStore((s) => s.nearbyAnchor);
   const viewportTarget = useMapStore((s) => s.viewportTarget);
   const viewportCity = useMapStore((s) => s.viewportCity);
 
@@ -103,20 +101,17 @@ function TabbedPlacesWidget({ expandable = true }) {
   const wSetGhostCity = useWishlistStore((s) => s.setGhostCity);
   const wishlist = useWishlistStore((s) => s.wishlist);
 
-  // Derive active items per priority: nearby > viewport > city tab.
+  // Derive active items per priority: viewport > city tab.
   const tabQ = useTabQuery(activeTab);
-  const nearbyQ = useNearbyQuery({ anchor: nearbyAnchor, category: activeTab });
   const vpQ = useViewportQuery({ target: viewportTarget, category: activeTab });
   const activeTabItems = useMemo(() => {
     if (!TAB_KEYS.includes(activeTab)) return [];
-    if (nearbyAnchor) return nearbyQ.data || [];
     if (viewportTarget) return vpQ.data || [];
     return tabQ.data || [];
-  }, [activeTab, nearbyAnchor, viewportTarget, tabQ.data, nearbyQ.data, vpQ.data]);
+  }, [activeTab, viewportTarget, tabQ.data, vpQ.data]);
   const activeTabLoading =
     TAB_KEYS.includes(activeTab) &&
-    ((nearbyAnchor && nearbyQ.isFetching) ||
-      (viewportTarget && vpQ.isFetching) ||
+    ((viewportTarget && vpQ.isFetching) ||
       tabQ.isFetching ||
       loading);
 

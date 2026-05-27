@@ -3,7 +3,7 @@ import { useMapStore } from '../../stores/mapStore';
 import { CATEGORY_CONFIG, CATEGORY_KEYS } from './constants';
 
 export default function MapFloatingHeader({
-  onSearchHere, onClearViewport, actionsDisabled, searchLoading, nearbyAnchor,
+  onSearchHere, onClearViewport, actionsDisabled, searchLoading,
   visibleCategories, onToggleCategory
 }) {
   return (
@@ -23,7 +23,7 @@ export default function MapFloatingHeader({
           disabled={actionsDisabled}
           title="Search for places centered on the current map view"
         >
-          {searchLoading && !nearbyAnchor ? 'Searching…' : 'Search here'}
+          {searchLoading ? 'Searching…' : 'Search here'}
         </button>
         <button
           type="button"

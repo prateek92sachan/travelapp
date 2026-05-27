@@ -1,31 +1,6 @@
 import { haversineKm } from '../../utils/geo';
 import { DENSITY_RADIUS_KM } from './constants';
 
-// Polygon ring approximating a geodesic circle around `center` with radius
-// `radiusKm`. Used by MapboxMapInner to draw the proximity ring (no turf dep).
-export function geodesicCirclePolygon(center, radiusKm, steps = 64) {
-  const coords = [];
-  const earthRadiusKm = 6371;
-  const angular = radiusKm / earthRadiusKm;
-  const latRad = (center.lat * Math.PI) / 180;
-  const lngRad = (center.lng * Math.PI) / 180;
-  for (let i = 0; i <= steps; i++) {
-    const bearing = (i / steps) * 2 * Math.PI;
-    const lat2 = Math.asin(
-      Math.sin(latRad) * Math.cos(angular) +
-        Math.cos(latRad) * Math.sin(angular) * Math.cos(bearing)
-    );
-    const lng2 =
-      lngRad +
-      Math.atan2(
-        Math.sin(bearing) * Math.sin(angular) * Math.cos(latRad),
-        Math.cos(angular) - Math.sin(latRad) * Math.sin(lat2)
-      );
-    coords.push([(lng2 * 180) / Math.PI, (lat2 * 180) / Math.PI]);
-  }
-  return { type: 'Polygon', coordinates: [coords] };
-}
-
 // Centroid of the densest pin cluster within DENSITY_RADIUS_KM.
 export function densestCentroid(pins) {
   if (!pins || pins.length < 2) return null;

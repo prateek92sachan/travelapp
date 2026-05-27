@@ -1,5 +1,5 @@
-// Small geographic utilities used by the proximity-ring feature.
-// Pure functions — no React, no async — easy to test in isolation.
+// Small geographic utilities (distance math used by map density centering and
+// move thresholds). Pure functions — no React, no async — easy to test.
 
 const EARTH_RADIUS_KM = 6371;
 
@@ -25,13 +25,4 @@ export function haversineKm(a, b) {
 
 function toRad(deg) {
   return (deg * Math.PI) / 180;
-}
-
-/**
- * Filter an array of {lat, lng, ...} items to those within `radiusKm`
- * of an origin point. Returns the original items, not augmented.
- */
-export function withinRadius(items, origin, radiusKm) {
-  if (!Array.isArray(items) || !origin) return [];
-  return items.filter((it) => haversineKm(origin, it) <= radiusKm);
 }

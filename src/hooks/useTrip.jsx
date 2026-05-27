@@ -33,7 +33,6 @@ import { useSearchStore } from '../stores/searchStore';
 import { queryClient } from '../lib/queryClient';
 import { weatherKey, lastYearWeatherKey, useCurrentWeather, useLastYearWeather } from './queries/useWeather';
 import { TAB_KEYS, tabQueryKey, buildTabQueryFn, useTabQuery } from './queries/useTabQuery';
-import { NEARBY_CATEGORIES, useNearbyQuery } from './queries/useNearbyQuery';
 import { VIEWPORT_CATEGORIES, useViewportQuery } from './queries/useViewportQuery';
 import { useEvents, eventsKey } from './queries/useEvents';
 import { fetchAnnualEvents } from '../services/events';
@@ -109,41 +108,16 @@ export function TripProvider({ children }) {
 
   // ---- Map layer state ----------------------------------------------------
   // mapStore owns map-mode state so single-domain consumers (MapControlsPanel,
-  // HotelInfoCard, NearbyModeIndicator, TransitLayer) can subscribe directly.
+  // TransitLayer) can subscribe directly.
   const mapType = useMapStore((s) => s.mapType);
   const setMapType = useMapStore((s) => s.setMapType);
   const transitOn = useMapStore((s) => s.transitOn);
   const setTransitOn = useMapStore((s) => s.setTransitOn);
-  const selectedHotelId = useMapStore((s) => s.selectedHotelId);
-  const setSelectedHotelId = useMapStore((s) => s.setSelectedHotelId);
-  const nearbyAnchor = useMapStore((s) => s.nearbyAnchor);
-  const setNearbyAnchor = useMapStore((s) => s.setNearbyAnchor);
   const viewportTarget = useMapStore((s) => s.viewportTarget);
   const setViewportTarget = useMapStore((s) => s.setViewportTarget);
   const viewportCity = useMapStore((s) => s.viewportCity);
   const setViewportCity = useMapStore((s) => s.setViewportCity);
-  const selectHotel = useMapStore((s) => s.selectHotel);
-  const exitNearbyMode = useMapStore((s) => s.exitNearbyMode);
   const refreshViewport = useMapStore((s) => s.refreshViewport);
-
-  const nearbyActQ = useNearbyQuery({ anchor: nearbyAnchor, category: 'activities' });
-  const nearbyRestQ = useNearbyQuery({ anchor: nearbyAnchor, category: 'restaurants' });
-  const nearbyNatQ = useNearbyQuery({ anchor: nearbyAnchor, category: 'nature' });
-  const nearbyGemsQ = useNearbyQuery({ anchor: nearbyAnchor, category: 'gems' });
-  const nearbyItems = useMemo(
-    () => ({
-      activities: nearbyActQ.data ?? null,
-      restaurants: nearbyRestQ.data ?? null,
-      nature: nearbyNatQ.data ?? null,
-      gems: nearbyGemsQ.data ?? null
-    }),
-    [nearbyActQ.data, nearbyRestQ.data, nearbyNatQ.data, nearbyGemsQ.data]
-  );
-  const nearbyLoading =
-    nearbyActQ.isFetching ||
-    nearbyRestQ.isFetching ||
-    nearbyNatQ.isFetching ||
-    nearbyGemsQ.isFetching;
 
   // ---- Viewport refresh state --------------------------------------------
   // viewportTarget controls the five useViewportQuery hooks. Null = no viewport
@@ -383,13 +357,10 @@ export function TripProvider({ children }) {
         setPlaceDisplay({ area: '', city: '' });
         // Clear events query so old destination's events don't linger.
         queryClient.removeQueries({ queryKey: ['events'] });
-        if (!preserveSelection) setSelectedHotelId(null);
 
-        // Exit nearby-mode and clear viewport overrides on new search.
-        // viewportCity is a pan-exploration artifact — reset it too so the
-        // "Save to <city>" target doesn't keep showing the previously-panned
-        // city after searching somewhere new.
-        setNearbyAnchor(null);
+        // Clear viewport overrides on new search. viewportCity is a pan-
+        // exploration artifact — reset it too so the "Save to <city>" target
+        // doesn't keep showing the previously-panned city after searching anew.
         setViewportTarget(null);
         setViewportCity(null);
         // Wipe the API-level viewport cache too — old city's data is irrelevant
@@ -674,10 +645,10 @@ export function TripProvider({ children }) {
     [activeWishlistId, wishlist]
   );
 
-  // ---- Hotel nearby + viewport modes --------------------------------------
-  // selectHotel, exitNearbyMode, refreshViewport are exposed by mapStore and
-  // subscribed at the top of this provider. clearViewportItems wraps the store
-  // action because it also dispatches a pan-to-city event.
+  // ---- Viewport mode ------------------------------------------------------
+  // refreshViewport is exposed by mapStore and subscribed at the top of this
+  // provider. clearViewportItems wraps the store action because it also
+  // dispatches a pan-to-city event.
   const clearViewportItems = useCallback(() => {
     useMapStore.getState().clearViewportTarget();
     const c = useSearchStore.getState().coords;
@@ -694,7 +665,6 @@ export function TripProvider({ children }) {
   const searchHere = useCallback(
     async ({ lat, lng, radiusMeters, bounds }) => {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-      if (nearbyAnchor) return;
       setWeatherTarget({ lat, lng, dateISO: useSearchStore.getState().date });
       refreshViewport({ lat, lng, radiusMeters, bounds });
       const city = await reverseGeocodeCity({ lat, lng }).catch(() => null);
@@ -705,30 +675,25 @@ export function TripProvider({ children }) {
         useWishlistStore.getState().setGhostCity(city);
       }
     },
-    [nearbyAnchor, refreshViewport, setWeatherTarget, setViewportCity]
+    [refreshViewport, setWeatherTarget, setViewportCity]
   );
 
   // Derive: items for the currently-active tab. Map widget reads from this.
   // Priority order:
-  //   1. Nearby-mode items (hotel selected)        → "near this hotel"
-  //   2. Viewport items (user has zoomed/panned)   → "in this area"
-  //   3. Normal tab data                            → "in this city"
+  //   1. Viewport items (user has zoomed/panned)   → "in this area"
+  //   2. Normal tab data                            → "in this city"
   const activeTabItems = useMemo(() => {
     if (!TAB_KEYS.includes(activeTab)) return [];
-    if (nearbyAnchor) return nearbyItems[activeTab] || [];
     if (viewportItems) return viewportItems[activeTab] || [];
     return tabData[activeTab] || [];
-  }, [nearbyAnchor, nearbyItems, viewportItems, tabData, activeTab]);
+  }, [viewportItems, tabData, activeTab]);
 
   // Loading state should reflect whichever data source is currently active.
   const activeTabLoading = useMemo(
     () =>
       TAB_KEYS.includes(activeTab) &&
-      ((nearbyAnchor && nearbyLoading) ||
-        viewportLoading ||
-        tabLoading[activeTab] ||
-        false),
-    [activeTab, nearbyAnchor, nearbyLoading, viewportLoading, tabLoading]
+      (viewportLoading || tabLoading[activeTab] || false),
+    [activeTab, viewportLoading, tabLoading]
   );
 
   const value = useMemo(
@@ -772,11 +737,6 @@ export function TripProvider({ children }) {
       setMapType,
       transitOn,
       setTransitOn,
-      selectedHotelId,
-      selectHotel,
-      nearbyAnchor,
-      nearbyLoading,
-      exitNearbyMode,
       viewportItems,
       viewportLoading,
       refreshViewport,
@@ -819,11 +779,6 @@ export function TripProvider({ children }) {
       viewportCity,
       mapType,
       transitOn,
-      selectedHotelId,
-      selectHotel,
-      nearbyAnchor,
-      nearbyLoading,
-      exitNearbyMode,
       viewportItems,
       viewportLoading,
       refreshViewport,

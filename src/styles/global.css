@@ -1516,53 +1516,8 @@ input { font-family: inherit; }
 }
 .toggle-switch.on .toggle-thumb { transform: translateX(16px); }
 
-/* ---------- Hotel info card ---------- */
-.hotel-info-card {
-  position: absolute;
-  bottom: 12px;
-  left: 12px;
-  width: min(360px, calc(100% - 24px));
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-2);
-  padding: 14px;
-  z-index: 50;
-  animation: slide-up 220ms ease-out;
-}
-
-.proximity-stats {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin: 12px 0;
-}
-.proximity-stat {
-  background: var(--bg-input);
-  border-radius: var(--radius-sm);
-  padding: 10px;
-  text-align: center;
-}
-.proximity-stat-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--accent);
-  line-height: 1;
-}
-.proximity-stat-label {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 4px;
-  line-height: 1.3;
-}
-
 @media (max-width: 720px) {
   .map-controls-body { width: 200px; }
-  .hotel-info-card {
-    left: 12px;
-    right: 12px;
-    width: auto;
-  }
 }
 
 .map-marker-poi {
@@ -3617,32 +3572,6 @@ input { font-family: inherit; }
   overflow-y: auto;
 }
 
-/* ---------- Nearby pill (map overlay — stays centered) ---------- */
-.nearby-pill {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--bg-elevated);
-  border: 1px solid var(--accent);
-  color: var(--text);
-  padding: 8px 14px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  box-shadow: var(--shadow-2);
-  z-index: 70;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-  animation: slide-down-pill 240ms ease-out;
-}
-.nearby-pill:hover { background: var(--bg-input); }
-.nearby-pill-x { color: var(--text-muted); font-size: 11px; }
-
-
 /* ---------- Viewport pill (card header — inline next to expand btn) ---------- */
 .viewport-pill {
   background: transparent;
@@ -3720,10 +3649,6 @@ input { font-family: inherit; }
 .provider-toggle-btn.active {
   background: var(--accent-soft);
   color: var(--accent);
-}
-@keyframes slide-down-pill {
-  from { opacity: 0; transform: translate(-50%, -8px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
 }
 /* ---------- Stack on smaller desktops / tablets ---------- */
 @media (max-width: 1200px) {

@@ -1,7 +1,7 @@
 // Provider routing layer. The map-data query hooks (useTabQuery /
-// useNearbyQuery / useViewportQuery) and useTrip.search() call THESE functions
-// instead of importing googleMaps directly, so the active map provider decides
-// the data source at call time:
+// useViewportQuery) and useTrip.search() call THESE functions instead of
+// importing googleMaps directly, so the active map provider decides the data
+// source at call time:
 //
 //   provider 'google'  -> Google Places (googleMaps)
 //   provider 'mapbox'  -> Google Places (googleMaps)   [Mapbox renders, Google data]

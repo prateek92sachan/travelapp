@@ -3,7 +3,6 @@ import { useTrip } from '../../hooks/useTrip';
 import { useSearchStore } from '../../stores/searchStore';
 import { useMapStore } from '../../stores/mapStore';
 import { useTabQuery } from '../../hooks/queries/useTabQuery';
-import { useNearbyQuery } from '../../hooks/queries/useNearbyQuery';
 import { useViewportQuery } from '../../hooks/queries/useViewportQuery';
 
 // Provider-agnostic data + callback assembly for map renderers.
@@ -14,8 +13,6 @@ export function useMapData() {
 
   const loading = useSearchStore((s) => s.loading);
   const selectedPlaceId = useSearchStore((s) => s.selectedPlaceId);
-  const nearbyAnchor = useMapStore((s) => s.nearbyAnchor);
-  const selectedHotelId = useMapStore((s) => s.selectedHotelId);
   const viewportTarget = useMapStore((s) => s.viewportTarget);
 
   // Pin tap → open the place's detail card only. No pan (the pin is already on
@@ -46,20 +43,6 @@ export function useMapData() {
     [tabActivities, tabRestaurants, tabNature, tabGems, tabHotels]
   );
 
-  const { data: nearbyAct } = useNearbyQuery({ anchor: nearbyAnchor, category: 'activities' });
-  const { data: nearbyRest } = useNearbyQuery({ anchor: nearbyAnchor, category: 'restaurants' });
-  const { data: nearbyNat } = useNearbyQuery({ anchor: nearbyAnchor, category: 'nature' });
-  const { data: nearbyGems } = useNearbyQuery({ anchor: nearbyAnchor, category: 'gems' });
-  const nearbyItems = useMemo(
-    () => ({
-      activities: nearbyAct ?? null,
-      restaurants: nearbyRest ?? null,
-      nature: nearbyNat ?? null,
-      gems: nearbyGems ?? null
-    }),
-    [nearbyAct, nearbyRest, nearbyNat, nearbyGems]
-  );
-
   const { data: vpAct } = useViewportQuery({ target: viewportTarget, category: 'activities' });
   const { data: vpRest } = useViewportQuery({ target: viewportTarget, category: 'restaurants' });
   const { data: vpNat } = useViewportQuery({ target: viewportTarget, category: 'nature' });
@@ -85,31 +68,23 @@ export function useMapData() {
     search({ destination: override });
   }, [search]);
 
-  const actionsDisabled = loading || !!nearbyAnchor;
+  const actionsDisabled = loading;
 
-  const anchorHotel = useMemo(() => {
-    if (nearbyAnchor) return nearbyAnchor;
-    return tabData.hotels?.find((h) => h.placeId === selectedHotelId) || null;
-  }, [nearbyAnchor, tabData.hotels, selectedHotelId]);
-
-  // Source priority: nearby > viewport (all 4 cats) > city-wide tabData
+  // Source priority: viewport (all 4 cats) > city-wide tabData
   const markersForCat = useCallback(
     (cat) => {
-      if (nearbyAnchor) return nearbyItems[cat] || [];
       if (viewportItems) return viewportItems[cat] || [];
       return tabData[cat] || [];
     },
-    [nearbyAnchor, nearbyItems, viewportItems, tabData]
+    [viewportItems, tabData]
   );
 
   return {
     loading,
     selectedPlaceId,
-    nearbyAnchor,
     viewportTarget,
     viewportItems,
     tabData,
-    anchorHotel,
     markersForCat,
     onPinTap,
     handleSearchHereClick,

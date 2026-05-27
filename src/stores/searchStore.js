@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { saveUIState } from '../utils/uiState';
-import { useMapStore } from './mapStore';
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -61,7 +60,6 @@ export const useSearchStore = create((set, get) => ({
     if (!place) {
       const currentTab = get().activeTab;
       set({ selectedPlace: null, selectedPlaceId: null });
-      useMapStore.getState().setSelectedHotelId(null);
       saveUIState({ activeTab: currentTab, selectedPlaceId: null });
       return;
     }
@@ -69,7 +67,6 @@ export const useSearchStore = create((set, get) => ({
       set({ activeTab: category });
     }
     set({ selectedPlaceId: place.placeId, selectedPlace: place });
-    useMapStore.getState().setSelectedHotelId(null);
     saveUIState({
       activeTab: category || get().activeTab,
       selectedPlaceId: place.placeId
