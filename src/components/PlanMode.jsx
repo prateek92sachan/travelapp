@@ -35,6 +35,7 @@ import {
   formatDuration,
 } from '../utils/plan';
 import { formatCount } from '../utils/format';
+import { fetchWikiSummary, isWikiMatch } from '../services/wikipedia';
 
 const PICKER_TABS = [
   { key: 'activities',  label: 'Activities',  Icon: Compass,   color: '#f97316' },
@@ -141,12 +142,74 @@ export default function PlanMode({ list }) {
   const plan = useMemo(() => ensurePlan(list?.plan), [list?.plan]);
 
   const items = list?.items || [];
+
+  // Flat placeId → live place map across every category currently loaded
+  // (city tabs + panned viewport). Lets a plan card borrow a fresh photo a
+  // snapshot was frozen without. Pure cache read — no network.
+  const liveById = useMemo(() => {
+    const m = {};
+    const add = (arr) => {
+      if (Array.isArray(arr)) for (const p of arr) if (p?.placeId && !m[p.placeId]) m[p.placeId] = p;
+    };
+    for (const k of Object.keys(tabData)) add(tabData[k]);
+    if (viewportItems) for (const k of Object.keys(viewportItems)) add(viewportItems[k]);
+    return m;
+  }, [tabData, viewportItems]);
+
   const itemById = useMemo(() => {
     const map = { ...(plan.placeSnapshots || {}) };
     // list.items wins over snapshots (more up-to-date fields like wiki enrichment).
     for (const it of items) map[it.placeId] = it;
+    // Borrow a photo from live query data for any entry still missing one.
+    for (const id of Object.keys(map)) {
+      if (!map[id]?.photoUrl && liveById[id]?.photoUrl) {
+        map[id] = { ...map[id], photoUrl: liveById[id].photoUrl };
+      }
+    }
     return map;
-  }, [items, plan.placeSnapshots]);
+  }, [items, plan.placeSnapshots, liveById]);
+
+  // Persist photos into photoless snapshots: borrow from live cache, else run
+  // the (guarded) free Wikipedia lookup, then write back into the plan so the
+  // photo survives reloads and revisits. Each placeId is attempted once.
+  const photoAttemptedRef = useRef(new Set());
+  useEffect(() => {
+    const snaps = plan.placeSnapshots || {};
+    const todo = Object.entries(snaps).filter(
+      ([id, s]) => s && !s.photoUrl && !photoAttemptedRef.current.has(id)
+    );
+    if (!todo.length) return undefined;
+    let cancelled = false;
+    (async () => {
+      const updates = {};
+      await Promise.all(
+        todo.map(async ([id, s]) => {
+          photoAttemptedRef.current.add(id);
+          if (liveById[id]?.photoUrl) {
+            updates[id] = liveById[id].photoUrl;
+            return;
+          }
+          const wiki = await fetchWikiSummary(s.name, list?.destination);
+          if (wiki?.thumbnail && isWikiMatch(s, wiki)) updates[id] = wiki.thumbnail;
+        })
+      );
+      if (cancelled || !Object.keys(updates).length) return;
+      const cur = ensurePlan(list?.plan);
+      const nextSnaps = { ...cur.placeSnapshots };
+      let changed = false;
+      for (const [id, url] of Object.entries(updates)) {
+        if (nextSnaps[id] && !nextSnaps[id].photoUrl) {
+          nextSnaps[id] = { ...nextSnaps[id], photoUrl: url };
+          changed = true;
+        }
+      }
+      if (changed) apply({ ...cur, placeSnapshots: nextSnaps });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan.placeSnapshots, liveById, list?.destination]);
 
   // Precomputed set of placeIds present in the plan. O(1) lookup per row in
   // the picker instead of an O(days × phases × sessions) scan via isPlacePlanned().

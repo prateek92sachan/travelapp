@@ -1,4 +1,24 @@
+import { toast } from 'sonner';
+
 const KEY = 'travel-app:wishlist';
+
+// Throttle quota warnings so a burst of failing saves shows one toast, not many.
+let lastQuotaToast = 0;
+function warnStorageFull(err) {
+  const quota =
+    err?.name === 'QuotaExceededError' ||
+    err?.code === 22 || // most browsers
+    err?.code === 1014; // Firefox
+  if (!quota) return;
+  const now = Date.now();
+  if (now - lastQuotaToast < 10000) return;
+  lastQuotaToast = now;
+  try {
+    toast.error('Storage full — changes may not be saved. Sign in to sync or free up space.');
+  } catch {
+    /* toast unavailable (no Toaster mounted) — nothing else to do */
+  }
+}
 
 function emptyWishlist() {
   return { version: 3, activeListId: null, lists: [] };
@@ -162,8 +182,10 @@ function normalize(raw) {
 function persist(wishlist) {
   try {
     localStorage.setItem(KEY, JSON.stringify(wishlist));
-  } catch {
-    // Storage can fail in private mode or if quota is exhausted.
+  } catch (err) {
+    // Storage can fail in private mode or if quota is exhausted. Surface quota
+    // exhaustion so the user knows their save didn't stick.
+    warnStorageFull(err);
   }
   return wishlist;
 }

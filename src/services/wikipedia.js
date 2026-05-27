@@ -21,6 +21,54 @@ const WIKI_TTL_MS = 24 * 60 * 60 * 1000;
 const WIKI_CACHE = loadCache('wiki', WIKI_TTL_MS);
 const persistWiki = makeSaver('wiki', { max: 500 });
 
+// ---- False-match guard ----------------------------------------------------
+// opensearch returns a single best-guess title, which is often wrong for
+// generically-named places ("Eden" → "Garden of Eden", a restaurant → a
+// same-named landmark in another country). Before trusting a result we require
+// the place's name to overlap the article title AND, when the article is
+// geotagged, to sit near the place. Purely local — no extra network.
+const WIKI_MAX_KM = 10;
+
+function normName(s) {
+  return (s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+function nameTokens(s) {
+  return normName(s).split(' ').filter((t) => t.length >= 3);
+}
+
+function kmBetween(aLat, aLng, bLat, bLng) {
+  const R = 6371;
+  const toRad = Math.PI / 180;
+  const dLat = (bLat - aLat) * toRad;
+  const dLng = (bLng - aLng) * toRad * Math.cos(((aLat + bLat) / 2) * toRad);
+  return Math.sqrt(dLat * dLat + dLng * dLng) * R;
+}
+
+// True if `wiki` (a fetchWikiSummary result) plausibly describes `place`.
+export function isWikiMatch(place, wiki) {
+  if (!wiki) return false;
+  // Title-overlap: at least half the place-name tokens must appear in the title.
+  const pT = nameTokens(place?.name);
+  if (pT.length) {
+    const tT = new Set(nameTokens(wiki.title));
+    const hits = pT.filter((t) => tT.has(t)).length;
+    if (hits / pT.length < 0.5) return false;
+  }
+  // Geo-distance: if the article carries coordinates, reject far-away matches.
+  const c = wiki.coordinates;
+  if (
+    c &&
+    Number.isFinite(c.lat) &&
+    Number.isFinite(c.lon) &&
+    Number.isFinite(place?.lat) &&
+    Number.isFinite(place?.lng)
+  ) {
+    if (kmBetween(place.lat, place.lng, c.lat, c.lon) > WIKI_MAX_KM) return false;
+  }
+  return true;
+}
+
 /**
  * Look up a place on Wikipedia, return { extract, url } or null.
  * Always resolves — never throws — so a single missing article doesn't
@@ -57,9 +105,13 @@ export async function fetchWikiSummary(placeName, context = '') {
     if (!sum.extract) return null;
 
     const result = {
+      title: sum.title || title,
       extract: sum.extract,
       url: sum.content_urls?.desktop?.page,
-      thumbnail: sum.thumbnail?.source || null
+      thumbnail: sum.thumbnail?.source || null,
+      coordinates: sum.coordinates
+        ? { lat: sum.coordinates.lat, lon: sum.coordinates.lon }
+        : null
     };
     WIKI_CACHE.set(query, result);
     persistWiki(WIKI_CACHE);
@@ -92,7 +144,7 @@ export async function backfillPhotosWithWiki(places, context = '') {
     places.map(async (p) => {
       if (p?.photoUrl) return p;
       const wiki = await fetchWikiSummary(p.name, context);
-      if (!wiki) return p;
+      if (!wiki || !isWikiMatch(p, wiki)) return p;
       changed = true;
       return wiki.thumbnail ? { ...p, wiki, photoUrl: wiki.thumbnail } : { ...p, wiki };
     })
@@ -113,7 +165,7 @@ export async function enrichWithWiki(places, context = '') {
   const enriched = await Promise.all(
     places.map(async (p) => {
       const wiki = await fetchWikiSummary(p.name, context);
-      if (!wiki) return p;
+      if (!wiki || !isWikiMatch(p, wiki)) return p;
       // Prefer free Wikimedia thumbnail over Google Places photo when available
       // (places that have a Wikipedia article are usually famous landmarks
       // where Wiki photos are appropriate; saves Google Photos API call).
