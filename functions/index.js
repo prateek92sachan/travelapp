@@ -9,9 +9,9 @@
  * Returned shape (all USD):
  *   {
  *     month: '2026-05',
- *     google_places:  { calls, actualUsd },
- *     google_photos:  { calls, actualUsd },
- *     google_other:   { calls, actualUsd }
+ *     google_places:  { calls, actual },
+ *     google_photos:  { calls, actual },
+ *     google_other:   { calls, actual }
  *   }
  *
  * Auth: requires authenticated Firebase user. The Functions runtime SA needs
@@ -46,7 +46,7 @@ async function resolveBillingTable() {
 async function fetchGoogleMtd() {
   const tableId = await resolveBillingTable();
   if (!tableId) {
-    const empty = { calls: null, actualUsd: null, error: 'no_billing_table' };
+    const empty = { calls: null, actual: null, error: 'no_billing_table' };
     return { google_places: empty, google_photos: empty, google_other: empty };
   }
   const fullTable = `\`${BILLING_PROJECT}.${BILLING_DATASET}.${tableId}\``;
@@ -54,7 +54,7 @@ async function fetchGoogleMtd() {
     SELECT
       service.description AS service_name,
       sku.description AS sku_name,
-      SUM(cost) AS cost_usd,
+      SUM(cost) AS cost_amount,
       SUM(IFNULL(usage.amount, 0)) AS usage_amount,
       ANY_VALUE(usage.unit) AS usage_unit
     FROM ${fullTable}
@@ -65,15 +65,15 @@ async function fetchGoogleMtd() {
   const [rows] = await bq.query({ query: sql, location: 'US' });
 
   const buckets = {
-    google_places: { calls: 0, actualUsd: 0 },
-    google_photos: { calls: 0, actualUsd: 0 },
-    google_other: { calls: 0, actualUsd: 0 }
+    google_places: { calls: 0, actual: 0 },
+    google_photos: { calls: 0, actual: 0 },
+    google_other: { calls: 0, actual: 0 }
   };
 
   for (const r of rows) {
     const service = (r.service_name || '').toLowerCase();
     const sku = (r.sku_name || '').toLowerCase();
-    const cost = Number(r.cost_usd) || 0;
+    const cost = Number(r.cost_amount) || 0;
     const usage = Number(r.usage_amount) || 0;
     const unit = (r.usage_unit || '').toLowerCase();
     const callCount = unit.includes('request') || unit === 'count' ? usage : 0;
@@ -93,7 +93,7 @@ async function fetchGoogleMtd() {
       continue;
     }
 
-    buckets[key].actualUsd += cost;
+    buckets[key].actual += cost;
     buckets[key].calls += callCount;
   }
 

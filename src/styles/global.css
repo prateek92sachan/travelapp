@@ -4088,6 +4088,24 @@ input { font-family: inherit; }
   font-style: italic;
   color: var(--text-muted);
 }
+.dashboard-card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  align-self: flex-start;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  transition: border-color var(--transition), background var(--transition);
+}
+.dashboard-card-link:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
 .dashboard-skel {
   display: inline-block;
   width: 48px;
