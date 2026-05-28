@@ -12,6 +12,7 @@ import {
   browserPopupRedirectResolver,
 } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getFunctions as _getFunctions, httpsCallable } from 'firebase/functions';
 
 // Use the current origin as authDomain when on a Firebase-Hosting domain so
 // the OAuth redirect handler runs same-origin (avoids Chrome 117+ storage
@@ -36,6 +37,7 @@ const firebaseConfig = {
 let _app = null;
 let _auth = null;
 let _db = null;
+let _functions = null;
 
 function ensureApp() {
   if (_app) return _app;
@@ -58,6 +60,15 @@ export function getAuth() {
 export function getDb() {
   if (!_db) _db = getFirestore(ensureApp());
   return _db;
+}
+
+export function getFunctions() {
+  if (!_functions) _functions = _getFunctions(ensureApp(), 'us-central1');
+  return _functions;
+}
+
+export function callable(name) {
+  return httpsCallable(getFunctions(), name);
 }
 
 export { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, browserPopupRedirectResolver };

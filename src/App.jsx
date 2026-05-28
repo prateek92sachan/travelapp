@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { Routes, Route } from 'react-router-dom';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import Header from './components/Header';
 import WeatherFloat from './components/WeatherFloat';
@@ -6,14 +7,12 @@ import MapWidget from './components/MapWidget';
 import PlacesDrawer from './components/PlacesDrawer';
 import EmptyStateGlobe from './components/EmptyStateGlobe';
 import ErrorBoundary from './components/ErrorBoundary';
+import Dashboard from './components/Dashboard';
 import { useTrip } from './hooks/useTrip';
 import { useIsDesktop } from './hooks/useIsDesktop';
 import { GOOGLE_MAPS_KEY, assertKeys } from './services/config';
 
 export default function App() {
-  const { coords, error } = useTrip();
-  const isDesktop = useIsDesktop();
-
   useEffect(() => {
     assertKeys();
   }, []);
@@ -22,49 +21,60 @@ export default function App() {
     <APIProvider apiKey={GOOGLE_MAPS_KEY}>
       <div className="app-shell">
         <Header />
-        <main className={`main ${coords ? 'main-map-dominant' : ''}`}>
-          {error && <ErrorBanner error={error} />}
-
-          {coords && (coords.isCountry || coords.isAdminRegion) && (
-            <BroadSearchHint coords={coords} />
-          )}
-
-          {!coords && !error && (
-            <ErrorBoundary label="Globe">
-              <EmptyStateGlobe />
-            </ErrorBoundary>
-          )}
-
-          {coords && (
-            <>
-              <ErrorBoundary label="Map">
-                <MapWidget />
-              </ErrorBoundary>
-              {isDesktop ? (
-                <>
-                  <ErrorBoundary label="Weather">
-                    <WeatherFloat />
-                  </ErrorBoundary>
-                  <ErrorBoundary label="Places">
-                    <PlacesDrawer />
-                  </ErrorBoundary>
-                </>
-              ) : (
-                <div className="mobile-bar-container">
-                  <ErrorBoundary label="Weather">
-                    <WeatherFloat />
-                  </ErrorBoundary>
-                  <div className="mobile-bar-divider" aria-hidden="true" />
-                  <ErrorBoundary label="Places">
-                    <PlacesDrawer />
-                  </ErrorBoundary>
-                </div>
-              )}
-            </>
-          )}
-        </main>
+        <Routes>
+          <Route path="/" element={<MapView />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+        </Routes>
       </div>
     </APIProvider>
+  );
+}
+
+function MapView() {
+  const { coords, error } = useTrip();
+  const isDesktop = useIsDesktop();
+  return (
+    <main className={`main ${coords ? 'main-map-dominant' : ''}`}>
+      {error && <ErrorBanner error={error} />}
+
+      {coords && (coords.isCountry || coords.isAdminRegion) && (
+        <BroadSearchHint coords={coords} />
+      )}
+
+      {!coords && !error && (
+        <ErrorBoundary label="Globe">
+          <EmptyStateGlobe />
+        </ErrorBoundary>
+      )}
+
+      {coords && (
+        <>
+          <ErrorBoundary label="Map">
+            <MapWidget />
+          </ErrorBoundary>
+          {isDesktop ? (
+            <>
+              <ErrorBoundary label="Weather">
+                <WeatherFloat />
+              </ErrorBoundary>
+              <ErrorBoundary label="Places">
+                <PlacesDrawer />
+              </ErrorBoundary>
+            </>
+          ) : (
+            <div className="mobile-bar-container">
+              <ErrorBoundary label="Weather">
+                <WeatherFloat />
+              </ErrorBoundary>
+              <div className="mobile-bar-divider" aria-hidden="true" />
+              <ErrorBoundary label="Places">
+                <PlacesDrawer />
+              </ErrorBoundary>
+            </div>
+          )}
+        </>
+      )}
+    </main>
   );
 }
 

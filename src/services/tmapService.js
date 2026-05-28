@@ -13,6 +13,7 @@
 
 import { MAPBOX_TOKEN } from './config';
 import { loadCache, makeSaver, clearCache } from '../utils/persistentCache';
+import { increment as usageInc } from '../utils/usageCounter';
 
 const CATEGORY_BASE = 'https://api.mapbox.com/search/searchbox/v1/category';
 const TIMEOUT_MS = 10000;
@@ -120,6 +121,7 @@ async function fetchCategory({ category, lat, lng, radiusMeters = 20000, limit =
 
   const { signal, clear } = timeoutSignal();
   try {
+    usageInc('mapbox');
     const res = await fetch(url, { signal });
     if (!res.ok) throw new Error(`Mapbox category ${canonical} failed: ${res.status}`);
     const data = await res.json();

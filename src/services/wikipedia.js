@@ -9,6 +9,7 @@
 // or "Tour Eiffel" might not redirect cleanly.
 
 import { loadCache, makeSaver } from '../utils/persistentCache';
+import { increment as usageInc } from './../utils/usageCounter';
 
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
 const WIKI_SEARCH =
@@ -88,6 +89,7 @@ export async function fetchWikiSummary(placeName, context = '') {
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
     // Step 1: search for the article title
+    usageInc('wiki');
     const searchRes = await fetch(WIKI_SEARCH + encodeURIComponent(query), { signal: controller.signal });
     if (!searchRes.ok) return null;
     const searchData = await searchRes.json();
@@ -96,6 +98,7 @@ export async function fetchWikiSummary(placeName, context = '') {
     if (!title) return null;
 
     // Step 2: fetch the summary
+    usageInc('wiki');
     const sumRes = await fetch(WIKI_REST + encodeURIComponent(title), { signal: controller.signal });
     if (!sumRes.ok) return null;
     const sum = await sumRes.json();

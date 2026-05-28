@@ -7,6 +7,7 @@
 // We label clearly which one we returned so the UI can be honest about it.
 
 import { OPENWEATHER_KEY } from './config';
+import { increment as usageInc } from '../utils/usageCounter';
 
 const FORECAST_HORIZON_DAYS = 5; // OpenWeather free tier limit
 
@@ -55,6 +56,7 @@ export async function fetchLastYearWeather({ lat, lng, dateISO }) {
       `precipitation_sum,wind_speed_10m_max` +
       `&hourly=relative_humidity_2m` +
       `&timezone=UTC`;
+    usageInc('openmeteo');
     const r = await fetch(url);
     if (!r.ok) return null;
     const j = await r.json();
@@ -98,6 +100,7 @@ async function fetchForecast({ lat, lng, dateISO }) {
   const url =
     `https://api.openweathermap.org/data/2.5/forecast` +
     `?lat=${lat}&lon=${lng}&units=metric&appid=${OPENWEATHER_KEY}`;
+  usageInc('openweather');
   const res = await fetch(url);
   if (!res.ok) throw new Error(`OpenWeather ${res.status}`);
   const data = await res.json();
@@ -171,6 +174,7 @@ async function fetchHistoricalAverage({ lat, lng, dateISO, kind }) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 10000);
       try {
+        usageInc('openmeteo');
         const r = await fetch(url, { signal: controller.signal });
         if (!r.ok) return null;
         const j = await r.json();

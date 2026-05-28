@@ -7,6 +7,7 @@
 //   - AbortError re-thrown so autocomplete callers can ignore stale requests
 
 import { MAPBOX_TOKEN } from './config';
+import { increment as usageInc } from '../utils/usageCounter';
 
 const GEOCODE_BASE = 'https://api.mapbox.com/geocoding/v5/mapbox.places';
 const SEARCH_BOX_BASE = 'https://api.mapbox.com/search/searchbox/v1';
@@ -74,6 +75,7 @@ export async function geocodeDestinationMapbox(destination) {
     `&limit=1`;
   const { signal, clear } = timeoutSignal();
   try {
+    usageInc('mapbox');
     const res = await fetch(url, { signal });
     if (!res.ok) throw new Error(`Mapbox geocode failed: ${res.status}`);
     const data = await res.json();
@@ -113,6 +115,7 @@ export async function reverseGeocodeCityMapbox({ lat, lng } = {}) {
     `&limit=1`;
   const { signal, clear } = timeoutSignal();
   try {
+    usageInc('mapbox');
     const res = await fetch(url, { signal });
     if (!res.ok) throw new Error(`Mapbox reverse-geocode failed: ${res.status}`);
     const data = await res.json();
@@ -138,6 +141,7 @@ export async function reverseGeocodePlaceNameMapbox({ lat, lng } = {}) {
     `&types=neighborhood,locality,place,district`;
   const { signal, clear } = timeoutSignal();
   try {
+    usageInc('mapbox');
     const res = await fetch(url, { signal });
     if (!res.ok) throw new Error(`Mapbox reverse-place failed: ${res.status}`);
     const data = await res.json();
@@ -189,6 +193,7 @@ export async function fetchPlacePredictionsMapbox(input, { sessionToken, signal 
     `&limit=8`;
   const { signal: combined, clear } = timeoutSignal(signal);
   try {
+    usageInc('mapbox');
     const res = await fetch(url, { signal: combined });
     if (!res.ok) throw new Error(`Mapbox suggest failed: ${res.status}`);
     const data = await res.json();

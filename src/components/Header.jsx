@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Clock, Link2, Menu, Moon, Sun } from 'lucide-react';
+import { Clock, Link2, Menu, Moon, Sun, BarChart3 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useTrip } from '../hooks/useTrip';
 import { useSearchStore } from '../stores/searchStore';
 import { useTheme } from '../hooks/useTheme';
@@ -150,6 +151,14 @@ export default function Header() {
                     : <Moon size={14} strokeWidth={2} aria-hidden />}
                   <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
                 </button>
+                <Link
+                  to="/dashboard"
+                  className="hamburger-item"
+                  onClick={() => setHamburgerOpen(false)}
+                >
+                  <BarChart3 size={14} strokeWidth={2} aria-hidden />
+                  <span>Dashboard</span>
+                </Link>
               </div>
             )}
           </div>
