@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Compass, Utensils, Leaf, Gem, BedDouble, Heart, Navigation, Pencil, Trash2 } from 'lucide-react';
+import { Compass, Utensils, Leaf, Gem, BedDouble, Navigation, Pencil, Trash2, Star } from 'lucide-react';
 import Card from './Card';
 import { useSearchStore } from '../stores/searchStore';
 import { useMapStore } from '../stores/mapStore';
@@ -79,7 +79,9 @@ function TabbedPlacesWidget({ expandable = true }) {
   const switchTab = useSearchStore((s) => s.switchTab);
   const selectedPlaceId = useSearchStore((s) => s.selectedPlaceId);
   const selectedPlace = useSearchStore((s) => s.selectedPlace);
+  const detailPlace = useSearchStore((s) => s.detailPlace);
   const selectPlace = useSearchStore((s) => s.selectPlace);
+  const closeDetail = useSearchStore((s) => s.closeDetail);
   const loading = useSearchStore((s) => s.loading);
 
   // Map domain (mode overrides drive activeTabItems priority)
@@ -205,9 +207,11 @@ function TabbedPlacesWidget({ expandable = true }) {
     ? shortListName(viewportCity)
     : shortListName(activeWishlist?.name || ghostCity);
 
-  // Use selectedPlace directly — avoids the card vanishing when tab switches
-  // before activeTabItems updates, or when data hasn't loaded yet.
-  const selected = selectedPlace;
+  // Detail card renders from `detailPlace` (set only on row tap / restore),
+  // NOT from `selectedPlace` (which now also reflects pin-tap highlight).
+  // Reading `detailPlace` directly avoids the card vanishing when tab
+  // switches before activeTabItems updates, or when data hasn't loaded yet.
+  const selected = detailPlace;
   const savedCount = activeWishlist?.items?.length || 0;
 
   // Refs so the re-anchor effect can read current values without them being deps.
@@ -299,7 +303,7 @@ function TabbedPlacesWidget({ expandable = true }) {
               aria-pressed={isWishlistTab}
               aria-label="My wishlist"
             >
-              <Heart
+              <Star
                 size={21}
                 strokeWidth={2}
                 aria-hidden
@@ -362,7 +366,7 @@ function TabbedPlacesWidget({ expandable = true }) {
       {selected && !isWishlistTab && (
         <PlaceDetail
           place={selected}
-          onClose={() => selectPlace(null)}
+          onClose={closeDetail}
           saved={isWishlisted(selected, effectiveListId)}
           activeListName={saveListName}
           onSave={() => addPlaceToSmartWishlist(selected, activeTab)}
@@ -837,17 +841,16 @@ const PlaceRow = memo(function PlaceRow({
               )}
             </span>
           )}
+          <button
+            type="button"
+            className={`activity-save-star ${saved ? 'saved' : ''}`}
+            onClick={toggleWishlist}
+            aria-label={`${saved ? 'Remove' : 'Save'} ${a.name} ${saved ? 'from' : 'to'} wishlist`}
+            title={`${saved ? 'Remove from' : 'Save to'} ${activeListName || 'wishlist'}`}
+          >
+            <Star size={16} strokeWidth={2} aria-hidden />
+          </button>
         </div>
-        <button
-          type="button"
-          className={`wishlist-action ${saved ? 'saved' : ''}`}
-          onClick={toggleWishlist}
-          aria-label={`${saved ? 'Remove' : 'Save'} ${a.name} ${saved ? 'from' : 'to'} wishlist`}
-          title={`${saved ? 'Remove from' : 'Save to'} ${activeListName || 'wishlist'}`}
-        >
-          <span aria-hidden>{saved ? '✓' : '+'}</span>
-          <span>{saved ? 'Saved' : `Save to ${activeListName || 'wishlist'}`}</span>
-        </button>
       </div>
     </div>
   );
@@ -917,7 +920,7 @@ const PlaceDetail = memo(function PlaceDetail({
 
       {place.photoUrl && (
         <div className="detail-photo">
-          <img src={place.photoUrl} alt={place.name} onError={(e) => (e.currentTarget.style.display = 'none')} />
+          <img src={place.photoUrl} alt={place.name} loading="lazy" onError={(e) => (e.currentTarget.style.display = 'none')} />
         </div>
       )}
 
@@ -958,7 +961,7 @@ const PlaceDetail = memo(function PlaceDetail({
 
       <div className="detail-actions">
         <button type="button" className={`btn detail-save-btn ${saved ? 'btn-ghost' : ''}`} onClick={toggleWishlist}>
-          <Heart size={14} strokeWidth={2} fill={saved ? 'currentColor' : 'none'} aria-hidden />
+          <Star size={14} strokeWidth={2} fill={saved ? 'currentColor' : 'none'} aria-hidden />
           {saved ? 'Saved' : 'Save'}
         </button>
         <a className="btn btn-outline detail-dir-btn" href={directionsUrl(place)} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>

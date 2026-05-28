@@ -7,7 +7,7 @@ import {
   Sun,
   Sunset,
   Moon,
-  Heart,
+  Star,
   Check,
   Compass,
   Utensils,
@@ -682,7 +682,7 @@ const LightPickerRow = memo(function LightPickerRow({ place, category, planned, 
         aria-label={saved ? 'Remove from wishlist' : 'Save to wishlist'}
         title={saved ? 'Saved to wishlist (tap to remove)' : 'Save to wishlist'}
       >
-        <Heart size={14} strokeWidth={2} fill={saved ? 'currentColor' : 'none'} aria-hidden />
+        <Star size={14} strokeWidth={2} fill={saved ? 'currentColor' : 'none'} aria-hidden />
       </button>
     </div>
   );
