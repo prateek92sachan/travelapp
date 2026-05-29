@@ -256,7 +256,8 @@ async function placesTextSearch({ textQuery, lat, lng, radiusMeters, fetchCount,
       body.locationBias = {
         circle: {
           center: { latitude: lat, longitude: lng },
-          radius: radiusMeters
+          // Google searchText caps circle.radius at 50000m.
+          radius: Math.min(50000, Math.max(1, radiusMeters))
         }
       };
     }
@@ -578,15 +579,16 @@ function quantize(n) {
   return Math.round(n / COORD_BUCKET) * COORD_BUCKET;
 }
 
-function viewportCacheKey({ lat, lng, radiusMeters, category, bounds }) {
+function viewportCacheKey({ lat, lng, radiusMeters, category, bounds, limit }) {
+  const lim = Number.isFinite(limit) ? limit : 10;
   if (bounds) {
     // Rectangle-keyed: quantize corners to ~0.5km buckets so micro-jitter
     // (idle re-fires while map is settling) still hits the cache, but real
     // pans/zooms get a fresh key.
     const q = (n) => (Math.round(n / 0.005) * 0.005).toFixed(3);
-    return `rect:${q(bounds.low.lat)},${q(bounds.low.lng)}:${q(bounds.high.lat)},${q(bounds.high.lng)}:${category}`;
+    return `rect:${q(bounds.low.lat)},${q(bounds.low.lng)}:${q(bounds.high.lat)},${q(bounds.high.lng)}:${category}:${lim}`;
   }
-  return `${quantize(lat).toFixed(2)}:${quantize(lng).toFixed(2)}:${radiusMeters}:${category}`;
+  return `${quantize(lat).toFixed(2)}:${quantize(lng).toFixed(2)}:${radiusMeters}:${category}:${lim}`;
 }
 
 const CATEGORY_QUERIES = {
@@ -619,7 +621,7 @@ export async function fetchPlacesInViewport({
   limit = 10,
   bounds = null
 }) {
-  const key = viewportCacheKey({ lat, lng, radiusMeters, category, bounds });
+  const key = viewportCacheKey({ lat, lng, radiusMeters, category, bounds, limit });
   const now = Date.now();
 
   // Cache hit

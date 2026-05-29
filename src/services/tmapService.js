@@ -166,13 +166,14 @@ export function fetchTopHotels({ lat, lng, radiusMeters = 20000, limit = 5 }) {
 
 // ---- Public: viewport + nearby (cached, deduped — mirrors googleMaps.js) ----
 
-function viewportCacheKey({ lat, lng, radiusMeters, category, bounds }) {
+function viewportCacheKey({ lat, lng, radiusMeters, category, bounds, limit }) {
+  const lim = Number.isFinite(limit) ? limit : 10;
   if (bounds) {
     const q = (n) => (Math.round(n / 0.005) * 0.005).toFixed(3);
-    return `rect:${q(bounds.low.lat)},${q(bounds.low.lng)}:${q(bounds.high.lat)},${q(bounds.high.lng)}:${category}`;
+    return `rect:${q(bounds.low.lat)},${q(bounds.low.lng)}:${q(bounds.high.lat)},${q(bounds.high.lng)}:${category}:${lim}`;
   }
   const q = (n) => (Math.round(n / 0.01) * 0.01).toFixed(2);
-  return `${q(lat)}:${q(lng)}:${radiusMeters}:${category}`;
+  return `${q(lat)}:${q(lng)}:${radiusMeters}:${category}:${lim}`;
 }
 
 export function fetchPlacesInViewport({
@@ -183,7 +184,7 @@ export function fetchPlacesInViewport({
   limit = 10,
   bounds = null
 }) {
-  const key = viewportCacheKey({ lat, lng, radiusMeters, category, bounds });
+  const key = viewportCacheKey({ lat, lng, radiusMeters, category, bounds, limit });
   const now = Date.now();
 
   const cached = VIEWPORT_CACHE.get(key);
