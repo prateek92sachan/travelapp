@@ -22,6 +22,26 @@ const WIKI_TTL_MS = 24 * 60 * 60 * 1000;
 const WIKI_CACHE = loadCache('wiki', WIKI_TTL_MS);
 const persistWiki = makeSaver('wiki', { max: 500 });
 
+// In-flight dedup — collapses concurrent calls for the same query into one.
+const INFLIGHT = new Map();
+
+// Bounded-concurrency Promise.all. Wikipedia search is free but a 50-pin
+// viewport firing 100 lookups in parallel is wasteful and slow.
+const ENRICH_CONCURRENCY = 5;
+async function mapWithConcurrency(items, limit, fn) {
+  const out = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const i = cursor++;
+      out[i] = await fn(items[i], i);
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, items.length) }, worker);
+  await Promise.all(workers);
+  return out;
+}
+
 // ---- False-match guard ----------------------------------------------------
 // opensearch returns a single best-guess title, which is often wrong for
 // generically-named places ("Eden" → "Garden of Eden", a restaurant → a
@@ -84,7 +104,18 @@ export async function fetchWikiSummary(placeName, context = '') {
   const query = context ? `${placeName} ${context}` : placeName;
 
   if (WIKI_CACHE.has(query)) return WIKI_CACHE.get(query);
+  if (INFLIGHT.has(query)) return INFLIGHT.get(query);
 
+  const promise = doFetchWikiSummary(query);
+  INFLIGHT.set(query, promise);
+  try {
+    return await promise;
+  } finally {
+    INFLIGHT.delete(query);
+  }
+}
+
+async function doFetchWikiSummary(query) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
@@ -143,15 +174,13 @@ export async function backfillPhotosWithWiki(places, context = '') {
   if (!Array.isArray(places) || places.length === 0) return places;
   if (!places.some((p) => !p?.photoUrl)) return places;
   let changed = false;
-  const out = await Promise.all(
-    places.map(async (p) => {
-      if (p?.photoUrl) return p;
-      const wiki = await fetchWikiSummary(p.name, context);
-      if (!wiki || !isWikiMatch(p, wiki)) return p;
-      changed = true;
-      return wiki.thumbnail ? { ...p, wiki, photoUrl: wiki.thumbnail } : { ...p, wiki };
-    })
-  );
+  const out = await mapWithConcurrency(places, ENRICH_CONCURRENCY, async (p) => {
+    if (p?.photoUrl) return p;
+    const wiki = await fetchWikiSummary(p.name, context);
+    if (!wiki || !isWikiMatch(p, wiki)) return p;
+    changed = true;
+    return wiki.thumbnail ? { ...p, wiki, photoUrl: wiki.thumbnail } : { ...p, wiki };
+  });
   return changed ? out : places;
 }
 
@@ -165,19 +194,14 @@ export async function backfillPhotosWithWiki(places, context = '') {
  */
 export async function enrichWithWiki(places, context = '') {
   if (!Array.isArray(places) || places.length === 0) return places;
-  const enriched = await Promise.all(
-    places.map(async (p) => {
-      const wiki = await fetchWikiSummary(p.name, context);
-      if (!wiki || !isWikiMatch(p, wiki)) return p;
-      // Prefer free Wikimedia thumbnail over Google Places photo when available
-      // (places that have a Wikipedia article are usually famous landmarks
-      // where Wiki photos are appropriate; saves Google Photos API call).
-      return {
-        ...p,
-        wiki,
-        photoUrl: wiki.thumbnail || p.photoUrl
-      };
-    })
-  );
+  const enriched = await mapWithConcurrency(places, ENRICH_CONCURRENCY, async (p) => {
+    const wiki = await fetchWikiSummary(p.name, context);
+    if (!wiki || !isWikiMatch(p, wiki)) return p;
+    return {
+      ...p,
+      wiki,
+      photoUrl: wiki.thumbnail || p.photoUrl
+    };
+  });
   return enriched;
 }

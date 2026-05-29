@@ -28,27 +28,42 @@ const TAB_FETCHERS = {
 export const tabQueryKey = ({ tabKey, destination, lat, lng, radiusMeters }) =>
   ['tab', activeDataSource(), tabKey, destination, lat, lng, radiusMeters];
 
-// Builds the queryFn for a tab. Returns initial items immediately; fires
-// Wikipedia enrichment in the background and writes the enriched result
-// back into the same cache entry via setQueryData.
+// Builds the queryFn for a tab. Returns initial items with photoUrl hidden
+// (stashed as googlePhotoUrl) so the browser never fetches a billed Google
+// Place Photo before Wikipedia enrichment has a chance to win. Wikipedia
+// resolves in the background; whichever survives (Wiki thumbnail preferred,
+// Google photo as fallback) lands via setQueryData and the card paints then.
 //
-// `hotels` skips enrichment (matches prior behavior).
+// `hotels` skips enrichment entirely — no Wiki swap possible, so render the
+// Google photo immediately (consistent with prior behavior).
 export function buildTabQueryFn({ tabKey, destination, lat, lng, radiusMeters }) {
   return async () => {
     const fetcher = TAB_FETCHERS[tabKey];
     if (!fetcher) return [];
     const items = await fetcher({ destination, lat, lng, radiusMeters });
-    if (tabKey !== 'hotels' && Array.isArray(items) && items.length) {
-      enrichWithWiki(items, destination)
-        .then((enriched) => {
-          queryClient.setQueryData(
-            tabQueryKey({ tabKey, destination, lat, lng, radiusMeters }),
-            enriched
-          );
-        })
-        .catch((err) => console.warn('Wiki enrich failed:', err));
+    if (tabKey === 'hotels' || !Array.isArray(items) || !items.length) {
+      return items;
     }
-    return items;
+    const stashed = items.map((p) => ({
+      ...p,
+      googlePhotoUrl: p.photoUrl,
+      photoUrl: null
+    }));
+    const key = tabQueryKey({ tabKey, destination, lat, lng, radiusMeters });
+    enrichWithWiki(stashed, destination)
+      .then((enriched) => {
+        // Only write back if the cache still holds the initial stashed
+        // payload — otherwise a refetch or destination change has replaced
+        // it and the enrichment would overwrite fresher data.
+        if (queryClient.getQueryData(key) !== stashed) return;
+        const final = enriched.map((p) => ({
+          ...p,
+          photoUrl: p.photoUrl || p.googlePhotoUrl
+        }));
+        queryClient.setQueryData(key, final);
+      })
+      .catch((err) => console.warn('Wiki enrich failed:', err));
+    return stashed;
   };
 }
 
