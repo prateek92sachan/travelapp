@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Compass, Utensils, Leaf, Gem, BedDouble, Navigation, Pencil, Trash2, Star } from 'lucide-react';
+import { Compass, Utensils, Leaf, Gem, BedDouble, Navigation, Pencil, Trash2, Star, Sparkles, RotateCw } from 'lucide-react';
 import Card from './Card';
 import { useSearchStore } from '../stores/searchStore';
 import { useMapStore } from '../stores/mapStore';
@@ -15,6 +15,7 @@ import { useTabQuery, TAB_KEYS } from '../hooks/queries/useTabQuery';
 import { useViewportQuery } from '../hooks/queries/useViewportQuery';
 import { directionsUrl } from '../services/googleMaps';
 import { fetchWikiSummary, isWikiMatch } from '../services/wikipedia';
+import { usePlaceSummary } from '../hooks/usePlaceSummary';
 import { SavedPlaceCard } from './WishlistPanel';
 import PlanMode from './PlanMode';
 import { formatCount, formatPrice } from '../utils/format';
@@ -902,6 +903,10 @@ const PlaceDetail = memo(function PlaceDetail({
   const wikiUrl = wikiData?.url ?? place.wiki?.url ?? null;
   const richDescription = wikiExtract;
 
+  const hasWiki = typeof wikiExtract === 'string' && wikiExtract.trim().length >= 30;
+  const { summary: aiSummary, state: aiState, retry: aiRetry } =
+    usePlaceSummary(isManual ? null : place.placeId, place.name, hasWiki);
+
   const toggleWishlist = () => { if (saved) onRemove(); else onSave(); };
 
   return createPortal(
@@ -921,6 +926,32 @@ const PlaceDetail = memo(function PlaceDetail({
       {place.photoUrl && (
         <div className="detail-photo">
           <img src={place.photoUrl} alt={place.name} loading="lazy" onError={(e) => (e.currentTarget.style.display = 'none')} />
+        </div>
+      )}
+
+      {/* AI summary (Claude Haiku) — appears above the Wikipedia block */}
+      {aiState !== 'idle' && (
+        <div className="detail-ai-summary">
+          <div className="detail-ai-summary-head">
+            <Sparkles size={12} strokeWidth={2} aria-hidden />
+            <span>AI summary</span>
+            {aiState === 'ready' && (
+              <span className="detail-ai-summary-source">· Web</span>
+            )}
+          </div>
+          {aiState === 'ready' && <p className="detail-ai-summary-text">{aiSummary}</p>}
+          {aiState === 'loading' && (
+            <div className="detail-ai-summary-skel">
+              <span className="skeleton skeleton-block" />
+              <span className="skeleton skeleton-block" />
+            </div>
+          )}
+          {aiState === 'error' && (
+            <button type="button" className="detail-ai-summary-retry" onClick={aiRetry}>
+              <RotateCw size={12} strokeWidth={2} aria-hidden />
+              Generate summary
+            </button>
+          )}
         </div>
       )}
 

@@ -8,7 +8,8 @@ import {
   BookOpen,
   Cloud,
   AlertTriangle,
-  ExternalLink
+  ExternalLink,
+  Sparkles
 } from 'lucide-react';
 import { readCurrentMonth } from '../utils/usageCounter';
 import { callable } from '../services/firebase';
@@ -30,11 +31,22 @@ function estimateMapboxInr(calls) {
   return (calls - MAPBOX_FREE_TIER) * MAPBOX_RATE_INR_PER_REQ;
 }
 
+// Claude Haiku 4.5: $1/M input + $5/M output. Detail-card summarize calls
+// average ~400 input tokens (Wiki extract + system prompt) and ~65 output
+// tokens (40-50 word summary ≈ ~65 tokens). At USD→INR ~85 that's
+// (1*400 + 5*65)/1e6 × 85 ≈ ₹0.062 per call.
+const CLAUDE_RATE_INR_PER_REQ = 0.062;
+function estimateClaudeInr(calls) {
+  if (!Number.isFinite(calls) || calls <= 0) return 0;
+  return calls * CLAUDE_RATE_INR_PER_REQ;
+}
+
 const GCP_LINKS = {
   google_places: `https://console.cloud.google.com/google/maps-apis/quotas?project=${GCP_PROJECT_ID}`,
   google_photos: `https://console.cloud.google.com/google/maps-apis/quotas?project=${GCP_PROJECT_ID}`,
   google_other:  `https://console.cloud.google.com/billing?project=${GCP_PROJECT_ID}`,
-  mapbox:        'https://account.mapbox.com/statistics/'
+  mapbox:        'https://account.mapbox.com/statistics/',
+  claude:        'https://console.anthropic.com/usage'
 };
 
 const SERVICES = [
@@ -42,6 +54,7 @@ const SERVICES = [
   { id: 'google_photos', label: 'Google Photos',  Icon: ImageIcon,  paid: true,  source: 'backend' },
   { id: 'google_other',  label: 'Google (other)', Icon: MapPin,     paid: true,  source: 'backend' },
   { id: 'mapbox',        label: 'Mapbox (REST)',  Icon: MapIcon,    paid: true,  source: 'local' },
+  { id: 'claude',        label: 'Claude (Haiku)', Icon: Sparkles,   paid: true,  source: 'local' },
   { id: 'wiki',          label: 'Wikipedia',      Icon: BookOpen,   paid: false, source: 'local' },
   { id: 'openweather',   label: 'OpenWeather',    Icon: Cloud,      paid: false, source: 'local' },
   { id: 'openmeteo',     label: 'Open-Meteo',     Icon: Cloud,      paid: false, source: 'local' }
@@ -100,14 +113,17 @@ export default function Dashboard() {
   const rows = SERVICES.map((s) => {
     if (s.source === 'local') {
       const calls = localCounts[s.id] || 0;
-      const actual = s.id === 'mapbox' ? estimateMapboxInr(calls) : 0;
-      const predicted = s.id === 'mapbox' ? projectEOM(actual) : 0;
+      let actual = 0;
+      if (s.id === 'mapbox') actual = estimateMapboxInr(calls);
+      else if (s.id === 'claude') actual = estimateClaudeInr(calls);
+      const estimated = s.id === 'mapbox' || s.id === 'claude';
+      const predicted = estimated ? projectEOM(actual) : 0;
       return {
         ...s,
         calls,
         actual,
         predicted,
-        estimated: s.id === 'mapbox',
+        estimated,
         status: 'ok'
       };
     }
@@ -243,7 +259,11 @@ function ServiceCard({ row }) {
       </div>
       {note && <div className="dashboard-card-pending">{note}</div>}
       {!pending && estimated && (
-        <div className="dashboard-card-pending">Estimated (Mapbox pricing × usage).</div>
+        <div className="dashboard-card-pending">
+          {row.id === 'claude'
+            ? 'Estimated (Haiku 4.5 pricing × usage).'
+            : 'Estimated (Mapbox pricing × usage).'}
+        </div>
       )}
       {GCP_LINKS[row.id] && (
         <a
@@ -252,7 +272,7 @@ function ServiceCard({ row }) {
           rel="noopener noreferrer"
           className="dashboard-card-link"
         >
-          <span>{row.id === 'mapbox' ? 'Mapbox console' : 'GCP console'}</span>
+          <span>{row.id === 'mapbox' ? 'Mapbox console' : row.id === 'claude' ? 'Anthropic console' : 'GCP console'}</span>
           <ExternalLink size={12} strokeWidth={2} aria-hidden />
         </a>
       )}
