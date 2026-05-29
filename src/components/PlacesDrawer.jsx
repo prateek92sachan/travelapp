@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Compass, Utensils, Leaf, Gem, BedDouble, Star, Map } from 'lucide-react';
 import TabbedPlacesWidget from './TabbedPlacesWidget';
 import { useIsDesktop } from '../hooks/useIsDesktop';
-import { useTrip } from '../hooks/useTrip';
+import { useSearchStore } from '../stores/searchStore';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 
 const MOBILE_TABS = [
@@ -17,7 +17,8 @@ const MOBILE_TABS = [
 
 export default function PlacesDrawer() {
   const isDesktop = useIsDesktop();
-  const { activeTab, switchTab } = useTrip();
+  const activeTab = useSearchStore((s) => s.activeTab);
+  const switchTab = useSearchStore((s) => s.switchTab);
   const [desktopExpanded, setDesktopExpanded] = useState(false);
   const drawerRef = useRef(null);
   const [mobileExpanded, setMobileExpanded] = useState(false);

@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react';
-import { useTrip } from '../../hooks/useTrip';
+import { useTripSearch } from '../../hooks/useTrip';
 import { useSearchStore } from '../../stores/searchStore';
 import { useMapStore } from '../../stores/mapStore';
 import { useTabQuery } from '../../hooks/queries/useTabQuery';
@@ -9,20 +9,21 @@ import { useViewportQuery } from '../../hooks/queries/useViewportQuery';
 // Returns everything a renderer needs to draw markers + wire actions, without
 // touching any Google/Mapbox-specific APIs.
 export function useMapData() {
-  const { selectPlace, clearViewportItems, search } = useTrip();
+  const selectPlace = useSearchStore((s) => s.selectPlace);
+  const clearViewportItems = useMapStore((s) => s.clearViewportItems);
+  const search = useTripSearch();
 
   const loading = useSearchStore((s) => s.loading);
   const selectedPlaceId = useSearchStore((s) => s.selectedPlaceId);
   const viewportTarget = useMapStore((s) => s.viewportTarget);
 
-  // Pin tap → open the place's detail card only. No pan (the pin is already on
-  // screen) and no city renavigation/refetch — tapping pins used to fire a full
-  // search() for the pin's locality, which re-centered coords and remounted the
-  // whole map on nearly every tap. selectPlace still switches to the place's
-  // category tab so the detail card resolves.
+  // Pin tap → highlight the matching drawer row + switch to that pin's
+  // category tab. Does NOT open the detail card and does NOT pan the map
+  // (the pin is already on screen). The user opens the detail card by then
+  // tapping the highlighted row in the drawer.
   const onPinTap = useCallback(
     (poi, category) => {
-      selectPlace(poi, category, { pan: false });
+      selectPlace(poi, category, { pan: false, openDetail: false });
     },
     [selectPlace]
   );

@@ -8,7 +8,8 @@ import PlacesDrawer from './components/PlacesDrawer';
 import EmptyStateGlobe from './components/EmptyStateGlobe';
 import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './components/Dashboard';
-import { useTrip } from './hooks/useTrip';
+import { useTripSearch } from './hooks/useTrip';
+import { useSearchStore } from './stores/searchStore';
 import { useIsDesktop } from './hooks/useIsDesktop';
 import { GOOGLE_MAPS_KEY, assertKeys } from './services/config';
 
@@ -31,7 +32,8 @@ export default function App() {
 }
 
 function MapView() {
-  const { coords, error } = useTrip();
+  const coords = useSearchStore((s) => s.coords);
+  const error = useSearchStore((s) => s.error);
   const isDesktop = useIsDesktop();
   return (
     <main className={`main ${coords ? 'main-map-dominant' : ''}`}>
@@ -84,7 +86,7 @@ function MapView() {
  * results scatter across hundreds of km and feel disconnected.
  */
 function BroadSearchHint({ coords }) {
-  const { search } = useTrip();
+  const search = useTripSearch();
   const suggestions = suggestionsFor(coords);
 
   // Pass `destination` as an override so search() doesn't rely on a

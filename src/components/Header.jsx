@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Clock, Link2, Menu, Moon, Sun, BarChart3 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useTrip } from '../hooks/useTrip';
+import { useTripSearch } from '../hooks/useTrip';
 import { useSearchStore } from '../stores/searchStore';
 import { useTheme } from '../hooks/useTheme';
 import { useAuth } from '../hooks/useAuth';
@@ -14,7 +14,13 @@ import { useClickOutside } from '../hooks/useClickOutside';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 
 export default function Header() {
-  const { destination, setDestination, date, setDate, search, loading, coords } = useTrip();
+  const destination = useSearchStore((s) => s.destination);
+  const setDestination = useSearchStore((s) => s.setDestination);
+  const date = useSearchStore((s) => s.date);
+  const setDate = useSearchStore((s) => s.setDate);
+  const loading = useSearchStore((s) => s.loading);
+  const coords = useSearchStore((s) => s.coords);
+  const search = useTripSearch();
   const placeArea = useSearchStore((s) => s.placeArea);
   const placeCity = useSearchStore((s) => s.placeCity);
   const { theme, toggle } = useTheme();

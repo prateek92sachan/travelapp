@@ -39,6 +39,11 @@ import { fetchAnnualEvents } from '../services/events';
 import { useAuth } from './useAuth';
 
 const TripContext = createContext(null);
+// Dedicated, minimal context for `search` — the only useTrip field that
+// can't trivially be read from a zustand store. Consumers that only need
+// `search` subscribe here and avoid re-rendering on unrelated TripContext
+// state changes.
+const TripSearchContext = createContext(null);
 
 // Re-export TAB_KEYS so existing consumers keep working without changing imports.
 export { TAB_KEYS };
@@ -102,6 +107,8 @@ export function TripProvider({ children }) {
   const setError = useSearchStore((s) => s.setError);
   const setSelectedPlaceId = useSearchStore((s) => s.setSelectedPlaceId);
   const setSelectedPlace = useSearchStore((s) => s.setSelectedPlace);
+  const setDetailPlaceId = useSearchStore((s) => s.setDetailPlaceId);
+  const setDetailPlace = useSearchStore((s) => s.setDetailPlace);
   // Snapshot URL params once for the auto-search useEffect below
   const initialRef = useRef({ destination, date });
   const wishlist = useWishlistStore((s) => s.wishlist);
@@ -562,6 +569,11 @@ export function TripProvider({ children }) {
         if (place) {
           setSelectedPlaceId(ui.selectedPlaceId);
           setSelectedPlace(place);
+          // Restore detail card too — the persisted selection represents
+          // "what the user was last looking at" rather than a pin-only
+          // highlight, so re-open the card on reload.
+          setDetailPlaceId(ui.selectedPlaceId);
+          setDetailPlace(place);
           // Re-open mobile drawer after React renders the restored state
           requestAnimationFrame(() => {
             window.dispatchEvent(new CustomEvent('travelapp:openPlaces'));
@@ -787,11 +799,25 @@ export function TripProvider({ children }) {
     ]
   );
 
-  return <TripContext.Provider value={value}>{children}</TripContext.Provider>;
+  const searchCtx = useMemo(() => ({ search }), [search]);
+
+  return (
+    <TripSearchContext.Provider value={searchCtx}>
+      <TripContext.Provider value={value}>{children}</TripContext.Provider>
+    </TripSearchContext.Provider>
+  );
 }
 
 export function useTrip() {
   const ctx = useContext(TripContext);
   if (!ctx) throw new Error('useTrip must be used inside TripProvider');
   return ctx;
+}
+
+// Returns just `search`. Subscribers do NOT re-render when other TripContext
+// fields change — prefer this over `useTrip().search` in new code.
+export function useTripSearch() {
+  const ctx = useContext(TripSearchContext);
+  if (!ctx) throw new Error('useTripSearch must be used inside TripProvider');
+  return ctx.search;
 }
