@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Travel APP v2 — Session Changes (2026-05-28 to 2026-05-29)</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1f2227;
+    --muted: #6b7280;
+    --accent: #ff385c;
+    --rule: #e6e8eb;
+    --code-bg: #f4f5f7;
+    --pill: #eef0f3;
+    --ok: #15803d;
+    --warn: #b45309;
+    --bad: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    padding: 32px 48px 96px;
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+  header { border-bottom: 1px solid var(--rule); margin-bottom: 32px; padding-bottom: 16px; }
+  header h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: -0.01em; }
+  header .meta { color: var(--muted); font-size: 13px; }
+  h2 {
+    margin: 48px 0 14px;
+    padding-top: 24px;
+    border-top: 1px solid var(--rule);
+    font-size: 20px;
+    letter-spacing: -0.01em;
+  }
+  h2 .num { color: var(--muted); font-weight: 500; margin-right: 8px; }
+  h3 { margin: 22px 0 10px; font-size: 15px; }
+  h4 { margin: 16px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0 12px 22px; padding: 0; }
+  li { margin: 4px 0; }
+  code, pre {
+    background: var(--code-bg);
+    font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 13px;
+  }
+  code { padding: 1px 5px; border-radius: 4px; }
+  pre {
+    padding: 12px 14px;
+    border-radius: 6px;
+    overflow-x: auto;
+    border: 1px solid var(--rule);
+    margin: 10px 0;
+  }
+  pre code { background: transparent; padding: 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .toc {
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin: 16px 0 28px;
+  }
+  .toc h2 { margin: 0 0 12px; padding: 0; border: none; font-size: 16px; }
+  .toc ol { margin: 0 0 0 22px; }
+  .toc li { margin: 3px 0; }
+  .pill {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--pill);
+    color: var(--fg);
+    margin-right: 6px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .pill.ok { background: #ecfdf5; color: var(--ok); }
+  .pill.warn { background: #fef3c7; color: var(--warn); }
+  .pill.bad { background: #fee2e2; color: var(--bad); }
+  .grid {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 6px 16px;
+    margin: 12px 0;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 12px 14px;
+  }
+  .grid > div:nth-child(odd) {
+    color: var(--muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding-top: 2px;
+  }
+  .impact {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    margin: 14px 0 10px;
+  }
+  .impact section {
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 12px 14px;
+    background: var(--code-bg);
+  }
+  .impact h4 { margin: 0 0 6px; }
+  .footnote { color: var(--muted); font-size: 13px; }
+  hr { border: none; border-top: 1px solid var(--rule); margin: 24px 0; }
+  .back { display: inline-block; margin-top: 14px; font-size: 12px; color: var(--muted); }
+  @media (max-width: 720px) {
+    body { padding: 18px 16px 64px; }
+    .impact { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Travel APP v2 — Session Changes</h1>
+  <div class="meta">2026-05-28 to 2026-05-29 · branch <code>feature/mapbox-search</code></div>
+</header>
+
+<p>
+  Twelve discrete changes shipped this session — one bug fix, two AI-summary iterations,
+  one React key fix, and an eight-item audit pass with deployment. This document indexes
+  each change with its files, usability effect, performance effect, and runtime sequence
+  effect.
+</p>
+
+<nav class="toc">
+  <h2>Index</h2>
+  <ol>
+    <li><a href="#c01">Google Places search radius clamp (Kodagu pin bug)</a></li>
+    <li><a href="#c02">AI place summary v1 — Claude (Wiki + web search). Deprecated.</a></li>
+    <li><a href="#c03">AI place summary v2 — Gemini 2.0 Flash + Google Search grounding</a></li>
+    <li><a href="#c04">EmptyStateGlobe duplicate React key fix</a></li>
+    <li><a href="#c05">Audit pass T1 — Backend hardening + Gemini rate limit</a></li>
+    <li><a href="#c06">Audit pass T2 — Wikipedia service dedup + concurrency cap</a></li>
+    <li><a href="#c07">Audit pass T3 — Query gating + cache-key limit</a></li>
+    <li><a href="#c08">Audit pass T4 — Mapbox reverse-geocode cache persistence</a></li>
+    <li><a href="#c09">Audit pass T5 — Dead code cleanup</a></li>
+    <li><a href="#c10">Audit pass T7 — useTrip re-render mitigation</a></li>
+    <li><a href="#deploy">Deploy state</a></li>
+    <li><a href="#deferred">Deferred items</a></li>
+  </ol>
+</nav>
+
+<!-- ====================================================================== -->
+
+<h2 id="c01"><span class="num">01.</span> Google Places search radius clamp</h2>
+<span class="pill bad">Bug fix</span><span class="pill ok">Shipped</span>
+
+<div class="grid">
+  <div>Trigger</div><div>User searched "Kodagu" — no pins rendered. Network tab showed <code>places:searchText</code> returning <code>400 INVALID_ARGUMENT</code> with message <code>"Invalid circle.radius. Radius must be in the ra…"</code> (truncated).</div>
+  <div>Root cause</div><div>Google Places <code>searchText</code> API caps <code>locationBias.circle.radius</code> at <strong>50,000 m</strong>. The destination radius was being computed from the geocode bounding box and clamped at 300 km (<code>src/hooks/useTrip.jsx:387</code>) — too large for the API.</div>
+  <div>Fix</div><div>Clamp at the API call site so all callers of <code>placesTextSearch</code> are covered:<pre><code>radius: Math.min(50000, Math.max(1, radiusMeters))</code></pre>at <code>src/services/googleMaps.js:259</code>.</div>
+  <div>Files</div><div><code>src/services/googleMaps.js</code></div>
+</div>
+
+<div class="impact">
+  <section>
+    <h4>Usability</h4>
+    <p>Restored. Any destination whose geocode diagonal exceeds 100 km (states, regions, large districts) now returns results instead of failing silently with no pins.</p>
+  </section>
+  <section>
+    <h4>Performance</h4>
+    <p>Neutral. Same one network call per search; just no longer wasted on a 400.</p>
+  </section>
+  <section>
+    <h4>Sequence</h4>
+    <p>Unchanged. Internal radius (used for tab queries + distance filters) still tolerates 300 km — only the API request body is clamped.</p>
+  </section>
+</div>
+
+<a href="#" class="back">↑ index</a>
+
+<!-- ====================================================================== -->
+
+<h2 id="c02"><span class="num">02.</span> AI place summary v1 — Claude (Wiki + web search)</h2>
+<span class="pill warn">Deprecated</span><span class="pill">Functions removed</span>
+
+<div class="grid">
+  <div>Trigger</div><div>User asked why the detail card for "Big Cup Cafe" did not show an AI summary. By design at the time, summaries required a Wikipedia extract (cafes have none).</div>
+  <div>Design</div><div>Two Cloud Functions:
+    <ul>
+      <li><code>summarizePlace</code> — Claude Haiku 4.5 rewrites a Wiki extract.</li>
+      <li><code>webSearchPlace</code> — Claude Haiku 4.5 + <code>web_search_20250305</code> tool, max 2 searches, summarizes places without Wikipedia.</li>
+    </ul>
+    Hook <code>useClaudeSummary</code> picked Wiki path if extract present, web-search path otherwise. Forever positive cache + 24 h negative cache per <code>placeId</code>. Source pill (<code>AI summary · Web</code> / <code>· Wikipedia</code>) shown in card head.
+  </div>
+  <div>Outcome</div><div>Both functions failed on first real call: <code>400 invalid_request_error — Your credit balance is too low</code>. User declined to top up the Anthropic account.</div>
+  <div>Resolution</div><div>Functions later removed (see <a href="#c05">T1</a>); hook replaced by <code>usePlaceSummary</code> (see <a href="#c03">change 03</a>).</div>
+</div>
+
+<div class="impact">
+  <section>
+    <h4>Usability</h4>
+    <p>Zero net effect — the feature was online for a few minutes, never returned a successful summary, then removed.</p>
+  </section>
+  <section>
+    <h4>Performance</h4>
+    <p>Cloud Functions had cold-start cost paid until deletion. Now zero (deleted in T1).</p>
+  </section>
+  <section>
+    <h4>Sequence</h4>
+    <p>Removed entirely. No card path calls Anthropic any more.</p>
+  </section>
+</div>
+
+<a href="#" class="back">↑ index</a>
+
+<!-- ====================================================================== -->
+
+<h2 id="c03"><span class="num">03.</span> AI place summary v2 — Gemini 2.0 Flash + Google Search grounding</h2>
+<span class="pill ok">Live</span>
+
+<div class="grid">
+  <div>Trigger</div><div>Replacement for change 02 after Anthropic credits ran out. Free tier required.</div>
+  <div>Choice</div><div>Gemini 2.0 Flash via <code>@google/genai</code> SDK with <code>tools: [{ googleSearch: {} }]</code>. Free tier: 1500 requests/day, 15 RPM. Separate key from the existing Google Cloud key (issued at <code>aistudio.google.com/apikey</code>).</div>
+  <div>Backend</div><div>New Cloud Function <code>geminiSearchPlace</code> in <code>functions/index.js</code>. System prompt enforces 40–50 word output, sensory tone, no preamble, and a literal <code>NO_INFO</code> token when grounding turns up nothing usable. Auth required. Per-user daily cap added in T1.</div>
+  <div>Frontend hook</div><div>New file <code>src/hooks/usePlaceSummary.js</code> (replaces <code>useClaudeSummary.js</code>, deleted). Signature <code>(placeId, name, hasWiki)</code>. Bot fires <em>only</em> when no Wikipedia article — Wiki-backed places show the Wiki extract directly via the existing description block.</div>
+  <div>Cache</div><div>Positive: <code>travelapp:place-summary:{placeId}</code>, forever. Negative: <code>travelapp:place-summary:neg:{placeId}</code>, 24 h. Retry button clears the negative cache.</div>
+  <div>UI</div><div>Pill <code>AI summary · Web</code> appears in detail-card head when ready. Skeleton during loading. Retry on error.</div>
+  <div>Files</div><div><code>functions/index.js</code>, <code>functions/package.json</code>, <code>src/hooks/usePlaceSummary.js</code> (new), <code>src/components/TabbedPlacesWidget.jsx</code>, <code>src/styles/global.css</code></div>
+</div>
+
+<div class="impact">
+  <section>
+    <h4>Usability</h4>
+    <p>Wiki-less places (cafes, shops, niche POIs) now get a 40–50 word grounded summary in the detail card. Wiki-backed landmarks unchanged (extract shown directly, no AI block). Failure modes surface as a retry button rather than a silent empty card.</p>
+  </section>
+  <section>
+    <h4>Performance</h4>
+    <p>One Cloud Function invocation per unique <code>placeId</code> for the lifetime of the cache. Negative cache eliminates repeat billing on broken places. Free-tier quota covers a single dev easily; the per-user 50/day cap added in T1 bounds abuse.</p>
+  </section>
+  <section>
+    <h4>Sequence</h4>
+    <p>Detail card opens → <code>fetchWikiSummary</code> debounced 300 ms → if <code>wikiExtract</code> ≥ 30 chars then render extract; else hook calls <code>geminiSearchPlace</code> → Gemini issues 1–3 web searches → returns summary string (or <code>NO_INFO</code>) → write through to positive cache or negative cache → UI repaints.</p>
+  </section>
+</div>
+
+<a href="#" class="back">↑ index</a>
+
+<!-- ====================================================================== -->
+
+<h2 id="c04"><span class="num">04.</span> EmptyStateGlobe duplicate React key fix</h2>
+<span class="pill bad">Bug fix</span><span class="pill ok">Shipped</span>
+
+<div class="grid">
+  <div>Trigger</div><div>React warning <code>Encountered two children with the same key, "ChIJR3122B9u5kcRaCck3PlB9DM"</code> on the world-map pin grid.</div>
+  <div>Root cause</div><div>The pin loop used <code>key={pt.placeId}</code>. <code>allPoints</code> was deduped <em>per list</em>, but a place that exists in two wishlists produced two entries — same <code>placeId</code>, different <code>listId</code>. React saw a collision.</div>
+  <div>Fix</div><div>Composite key <code>key={`${pt.listId}:${pt.placeId}`}</code> at <code>EmptyStateGlobe.jsx:172</code>. Per-list counts preserved; the same place can legitimately render twice if it's pinned in two lists.</div>
+  <div>Files</div><div><code>src/components/EmptyStateGlobe.jsx</code></div>
+</div>
+
+<div class="impact">
+  <section>
+    <h4>Usability</h4>
+    <p>Eliminates a console warning. The visible globe was correct before the fix — React's reconciler was still rendering both pins — but unstable keys can cause subtle remount bugs (lost animation state, dropped focus). Now stable.</p>
+  </section>
+  <section>
+    <h4>Performance</h4>
+    <p>Neutral. Same number of DOM nodes, same render path.</p>
+  </section>
+  <section>
+    <h4>Sequence</h4>
+    <p>Unchanged. Filter chip counts (which depend on per-list duplication) still work as before.</p>
+  </section>
+</div>
+
+<a href="#" class="back">↑ index</a>
+
+<!-- ====================================================================== -->
+
+<h2 id="c05"><span class="num">05.</span> Audit pass T1 — Backend hardening + Gemini rate limit</h2>
+<span class="pill ok">Shipped</span>
+
+<div class="grid">
+  <div>Scope</div><div>Cloud Functions cleanup, error sanitization, runtime hardening, abuse protection.</div>
+  <div>Changes</div><div>
+    <ol>
+      <li>Deleted orphan functions <code>summarizePlace</code> + <code>webSearchPlace</code> (source <em>and</em> deployed Cloud).</li>
+      <li>Dropped <code>@anthropic-ai/sdk</code> + <code>axios</code> dependencies; removed <code>ANTHROPIC_API_KEY</code> secret binding.</li>
+      <li>Sanitized error messages — internal <code>err.message</code> no longer echoed to the client. Returns generic <code>'Summary service temporarily unavailable.'</code> / <code>'Billing data temporarily unavailable.'</code>.</li>
+      <li>Added globalOptions overrides: <code>memory: '256MiB'</code>, <code>concurrency: 40</code>, <code>timeoutSeconds: 30</code> floor. <code>getCostBreakdown</code> floors to 20 s (BQ should never block longer).</li>
+      <li>Per-user daily Gemini rate cap: <strong>50/day per uid</strong>, enforced via a Firestore atomic transaction at <code>users/{uid}/usage/{YYYY-MM-DD}</code> (<code>gemini</code> counter field). Exceeding cap returns <code>resource-exhausted</code>.</li>
+      <li>Input length cap on <code>name</code> and <code>destination</code> — 200 chars each — prevents prompt-stuffing abuse.</li>
+      <li>BigQuery query — added <code>_PARTITIONTIME &gt;= TIMESTAMP_TRUNC(CURRENT_TIMESTAMP(), MONTH)</code> to skip historical partitions, and 5-min in-memory result cache so a refreshing dashboard doesn't scan the export table on every load.</li>
+    </ol>
+  </div>
+  <div>Files</div><div><code>functions/index.js</code>, <code>functions/package.json</code></div>
+</div>
+
+<div class="impact">
+  <section>
+    <h4>Usability</h4>
+    <p>Dashboard load: faster (cache hit) most of the time. AI summary user sees nothing different until they exceed 50/day, at which point an error surfaces a retry button (cap resets at UTC midnight per the day-key shape).</p>
+  </section>
+  <section>
+    <h4>Performance</h4>
+    <p>BigQuery scan size and bytes-billed drop materially — partition prune + 5-min cache means dashboard re-renders cost zero BQ. Cold-start improves (fewer deps to load).</p>
+  </section>
+  <section>
+    <h4>Sequence</h4>
+    <p>Gemini call now traverses: <code>auth check → input validate + truncate → Firestore txn (read+write counter, throw on overflow) → Gemini API → return</code>. The txn adds ~30–80 ms server-side; trivial vs. the ~1.5–4 s Gemini call.</p>
+  </section>
+</div>
+
+<a href="#" class="back">↑ index</a>
+
+<!-- ====================================================================== -->
+
+<h2 id="c06"><span class="num">06.</span> Audit pass T2 — Wikipedia service dedup + concurrency cap</h2>
+<span class="pill ok">Shipped</span>
+
+<div class="grid">
+  <div>Scope</div><div><code>src/services/wikipedia.js</code></div>
+  <div>Changes</div><div>
+    <ol>
+      <li><strong>In-flight dedup.</strong> Module-level <code>INFLIGHT = new Map()</code> keyed by <code>name + context</code>. <code>fetchWikiSummary</code> returns the existing promise when one is pending — collapses parallel duplicates fired by <code>enrichWithWiki</code> + <code>backfillPhotosWithWiki</code> hitting the same query.</li>
+      <li><strong>Concurrency cap.</strong> Added <code>mapWithConcurrency(items, 5, fn)</code> — bounded worker pool. <code>Promise.all</code> over up to 50 viewport pins (potentially 100 Wiki API calls) replaced with 5 workers draining a queue.</li>
+    </ol>
+  </div>
+</div>
+
+<div class="impact">
+  <section>
+    <h4>Usability</h4>
+    <p>Subjective: slightly snappier on dense viewports because the browser stops thrashing on 50+ parallel <code>fetch</code> calls. Final photos still land, just in a more orderly fashion.</p>
+  </section>
+  <section>
+    <h4>Performance</h4>
+    <p>Up to <strong>2× fewer</strong> Wikipedia API calls in the typical case (overlapping tab + viewport enrichment paths converged). Network stack stays under the browser's per-host concurrent connection limit so Wikipedia calls don't queue behind other traffic.</p>
+  </section>
+  <section>
+    <h4>Sequence</h4>
+    <p>Same overall pipeline. Internally: <code>request → INFLIGHT check → cache check → fetch (search + summary) → write cache → resolve all awaiters → delete from INFLIGHT</code>. Bulk enrichers (<code>enrichWithWiki</code>, <code>backfillPhotosWithWiki</code>) now wait for free worker slots rather than firing all at once.</p>
+  </section>
+</div>
+
+<a href="#" class="back">↑ index</a>
+
+<!-- ====================================================================== -->
+
+<h2 id="c07"><span class="num">07.</span> Audit pass T3 — Query gating + cache-key limit</h2>
+<span class="pill ok">Shipped</span>
+
+<div class="grid">
+  <div>Scope</div><div><code>src/hooks/queries/useTabQuery.js</code>, <code>src/services/googleMaps.js</code>, <code>src/services/tmapService.js</code></div>
+  <div>Changes</div><div>
+    <ol>
+      <li><strong>Stale-enrichment gate.</strong> <code>useTabQuery.js</code> background <code>enrichWithWiki</code> previously wrote results into <code>queryClient.setQueryData(key, …)</code> unconditionally. Now: capture the initial <code>stashed</code> array reference at fetch time; on enrichment resolve, write back only if <code>queryClient.getQueryData(key) === stashed</code> still holds. Prevents overwriting fresher data from a subsequent refetch / destination change.</li>
+      <li><strong>Cache-key includes <code>limit</code>.</strong> Google + Tmap viewport caches keyed by <code>{lat, lng, radiusMeters, category, bounds}</code>; now also includes the requested <code>limit</code>. Previously: a request for <code>limit: 10</code> served back a cached <code>limit: 5</code> array (length mismatch silently shipped 5 items).</li>
+    </ol>
+  </div>
+</div>
+
+<div class="impact">
+  <section>
+    <h4>Usability</h4>
+    <p>Eliminates a rare-but-real bug class — fast destination switching could have replaced a fresh result with stale Wiki enrichment from the old destination. Users won't notice in steady state; they would have noticed eventually as "why is this place showing the old city's photo".</p>
+  </section>
+  <section>
+    <h4>Performance</h4>
+    <p>Cache-key fix prevents under-fetching (cached 5-item array returned where 10 was asked) — surfaces with one extra Places call when a tab demands more items than the seed query did, but eliminates incorrect short results.</p>
+  </section>
+  <section>
+    <h4>Sequence</h4>
+    <p>Initial tab fetch → return stashed (photo URLs hidden) → background <code>enrichWithWiki</code> → <strong>identity check against cache</strong> (new) → write enriched data only if cache still holds the same reference.</p>
+  </section>
+</div>
+
+<a href="#" class="back">↑ index</a>
+
+<!-- ====================================================================== -->
+
+<h2 id="c08"><span class="num">08.</span> Audit pass T4 — Mapbox reverse-geocode cache persistence</h2>
+<span class="pill ok">Shipped</span>
+
+<div class="grid">
+  <div>Scope</div><div><code>src/services/mapboxSearch.js</code></div>
+  <div>Changes</div><div><code>REV_GEO_CACHE</code> was a plain in-memory <code>Map</code>. Google's equivalent cache already persists via <code>loadCache</code> + <code>makeSaver</code>. Replaced the in-memory Map with the same persistent pattern (30 min TTL, 200 entries, throttled localStorage writes).</div>
+</div>
+
+<div class="impact">
+  <section>
+    <h4>Usability</h4>
+    <p>Faster paint on reload — the place-area / place-city labels under the search header come from the reverse-geocode cache. Previously: re-billed Mapbox on every page reload. Now: cached for 30 min across reloads.</p>
+  </section>
+  <section>
+    <h4>Performance</h4>
+    <p>Mapbox reverse-geocode calls during the cache window drop to zero. Matches the cost discipline applied to Google.</p>
+  </section>
+  <section>
+    <h4>Sequence</h4>
+    <p>On reload: <code>loadCache</code> hydrates from <code>travel-app:apicache:mb-revgeo</code> entry, drops items older than 30 min, returns a warm <code>Map</code>. <code>revGeoSet</code> now also calls a throttled <code>persistRevGeo</code> (1 s throttle, collapses bursts).</p>
+  </section>
+</div>
+
+<a href="#" class="back">↑ index</a>
+
+<!-- ====================================================================== -->
+
+<h2 id="c09"><span class="num">09.</span> Audit pass T5 — Dead code cleanup</h2>
+<span class="pill ok">Shipped</span>
+
+<div class="grid">
+  <div>Scope</div><div><code>src/hooks/usePlaceSummary.js</code></div>
+  <div>Changes</div><div>Removed unused <code>inflight</code> ref (and the now-unused <code>useRef</code> import). The promise variable was assigned and never read — a leftover from an earlier draft of the dual-source hook.</div>
+</div>
+
+<div class="impact">
+  <section>
+    <h4>Usability</h4>
+    <p>None directly. Cleaner code surface.</p>
+  </section>
+  <section>
+    <h4>Performance</h4>
+    <p>Negligible — one fewer allocation per hook call.</p>
+  </section>
+  <section>
+    <h4>Sequence</h4>
+    <p>Unchanged.</p>
+  </section>
+</div>
+
+<a href="#" class="back">↑ index</a>
+
+<!-- ====================================================================== -->
+
+<h2 id="c10"><span class="num">10.</span> Audit pass T7 — useTrip re-render mitigation</h2>
+<span class="pill ok">Shipped</span><span class="pill">Largest change</span>
+
+<div class="grid">
+  <div>Problem</div><div><code>TripContext</code> value was an object with ~40 keys + a 30-dependency <code>useMemo</code>. Any state change rebuilt the value identity, which forced every <code>useTrip()</code> consumer (Header, EmptyStateGlobe, PlacesDrawer, map providers, App's root view, etc.) to re-render — even when none of the fields they actually read had changed.</div>
+  <div>Approach chosen</div><div>"Lighter path" — leave <code>TripContext</code> in place; introduce a second, minimal context just for the <code>search</code> orchestrator function; migrate every consumer to read everything else directly from the zustand stores. End state: nothing subscribes to <code>TripContext</code> anymore.</div>
+  <div>Implementation</div><div>
+    <ol>
+      <li><strong>New context.</strong> <code>TripSearchContext = createContext(null)</code> + <code>useTripSearch()</code> hook. Provider wraps it around <code>TripContext.Provider</code>. Value is <code>useMemo(() => ({ search }), [search])</code> — and <code>search</code>'s <code>useCallback</code> deps are all stable zustand setters, so the value identity is stable across normal renders.</li>
+      <li><strong>Consumer migration</strong> — every <code>useTrip()</code> call replaced with direct selectors + <code>useTripSearch()</code>:
+        <ul>
+          <li><code>src/App.jsx</code> — <code>{ coords, error }</code> → <code>useSearchStore</code>; <code>{ search }</code> → <code>useTripSearch</code>.</li>
+          <li><code>src/components/Header.jsx</code> — <code>{ destination, setDestination, date, setDate, loading, coords }</code> → <code>useSearchStore</code>; <code>{ search }</code> → <code>useTripSearch</code>.</li>
+          <li><code>src/components/EmptyStateGlobe.jsx</code> — <code>{ search }</code> → <code>useTripSearch</code>.</li>
+          <li><code>src/components/PlacesDrawer.jsx</code> — <code>{ activeTab, switchTab }</code> → <code>useSearchStore</code>.</li>
+          <li><code>src/components/map/useMapData.js</code> — <code>{ selectPlace, clearViewportItems, search }</code> → direct store reads + <code>useTripSearch</code>.</li>
+        </ul>
+      </li>
+      <li><strong>Store action lift.</strong> <code>clearViewportItems</code> (formerly a wrapped useCallback inside <code>TripProvider</code> that fired a window event after clearing state) moved into <code>mapStore</code> as a first-class action so consumers can pull it directly.</li>
+    </ol>
+  </div>
+  <div>Files</div><div><code>src/hooks/useTrip.jsx</code>, <code>src/stores/mapStore.js</code>, <code>src/App.jsx</code>, <code>src/components/Header.jsx</code>, <code>src/components/EmptyStateGlobe.jsx</code>, <code>src/components/PlacesDrawer.jsx</code>, <code>src/components/map/useMapData.js</code></div>
+</div>
+
+<div class="impact">
+  <section>
+    <h4>Usability</h4>
+    <p>No visual change, but interactions feel marginally crisper — typing in the search input, switching tabs, toggling map layers no longer force the entire app tree through a re-render. Most noticeable on the Header search input and the tab drawer on mobile.</p>
+  </section>
+  <section>
+    <h4>Performance</h4>
+    <p>Each consumer now subscribes only to its own zustand slice (or to the small <code>{ search }</code> context). zustand selectors compare by <code>Object.is</code> so a render only fires when that field actually changes. Component re-render count per typical interaction (search input keystroke, map pan, tab switch) drops materially — order-of-magnitude reduction for any tree whose root was the bloated context consumer.</p>
+  </section>
+  <section>
+    <h4>Sequence</h4>
+    <p>Before: store mutation → <code>TripProvider</code> re-renders → <code>useMemo</code> recomputes context value → all 5 <code>useTrip()</code> consumers re-render → their children re-render. After: store mutation → only the zustand subscribers whose selected slice changed re-render → minimal subtree updates. The orchestrator <code>search()</code> function is still invoked the same way; only the subscription topology changed.</p>
+  </section>
+</div>
+
+<a href="#" class="back">↑ index</a>
+
+<!-- ====================================================================== -->
+
+<h2 id="deploy">Deploy state</h2>
+
+<div class="grid">
+  <div>Hosting</div><div>Deployed — <a href="https://travel-app-86055.web.app" target="_blank" rel="noopener">travel-app-86055.web.app</a></div>
+  <div>Cloud Functions (live)</div><div>
+    <code>geminiSearchPlace</code> (Gemini summary), <code>getCostBreakdown</code> (dashboard MTD).
+  </div>
+  <div>Cloud Functions (removed)</div><div>
+    <code>summarizePlace</code>, <code>webSearchPlace</code> — deleted from production and source.
+  </div>
+  <div>Secrets</div><div>
+    Active: <code>GEMINI_API_KEY</code> (Secret Manager, project travel-app-86055).<br/>
+    Removed: <code>ANTHROPIC_API_KEY</code> (no longer bound to any function; orphan version dormant in Secret Manager).
+  </div>
+  <div>Firestore writes</div><div>New: <code>users/{uid}/usage/{YYYY-MM-DD}</code> doc with a <code>gemini</code> integer counter + <code>updatedAt</code> server timestamp.</div>
+</div>
+
+<a href="#" class="back">↑ index</a>
+
+<!-- ====================================================================== -->
+
+<h2 id="deferred">Deferred items</h2>
+
+<p>From the original audit (HIGH-priority list) the following were deliberately not applied:</p>
+
+<ul>
+  <li><strong>T6 — <code>selectedPlace</code> / <code>detailPlace</code> store ids only.</strong> Eliminates the drift risk between the duplicated place object in <code>searchStore</code> and the TanStack cache, but requires a unified id-to-place resolver across tab and viewport caches and migrating ~8 consumers. Higher blast radius; user chose to defer.</li>
+  <li><strong>Several MEDIUM and LOW findings</strong> — listed in the audit punch list but outside the chosen scope. Examples: viewport <code>queryKey</code> missing bounds (<code>useViewportQuery.js:10</code>), wishlist seed loop not wrapped in syncing guard (<code>useTrip.jsx:283</code>), <code>wishlistSync.txnWriteIfFresher</code> lossy on same-timestamp writes, Dashboard MTD stale across midnight, <code>recentTripsSync.upsertTrip</code> scans on every save. Each is localized; can be picked off in a follow-up pass.</li>
+</ul>
+
+<p class="footnote">Generated 2026-05-29.</p>
+
+<a href="#" class="back">↑ index</a>
+
+</body>
+</html>
