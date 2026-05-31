@@ -210,12 +210,13 @@ export const useWishlistStore = create((set, get) => {
 
     addToPlanSlot: ({ destination, country, place, category, dayIndex, phase, asHotel, newDay }) => {
       if (!place?.placeId || !destination) return null;
-      const { listId, created } = ensurePlanList({ destination, country });
+      const { wishlist: ensured, listId, created } = ensurePlanList({ destination, country });
       if (!listId) return null;
 
-      const srcList = findList(get().wishlist, listId);
+      const srcList = findList(ensured, listId);
       let plan = ensurePlan(srcList?.plan);
 
+      // For a new day, capture its index (current day count) BEFORE setDays extends the plan.
       let targetDay = newDay ? plan.days : dayIndex;
       if (newDay) plan = setDays(plan, plan.days + 1);
       if (targetDay == null || targetDay < 0 || targetDay >= plan.days) targetDay = 0;
