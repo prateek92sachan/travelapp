@@ -5,8 +5,6 @@ import {
   browserLocalPersistence,
   GoogleAuthProvider,
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
   signOut,
   onAuthStateChanged,
   browserPopupRedirectResolver,
@@ -82,4 +80,4 @@ export function callable(name) {
   return httpsCallable(getFunctions(), name);
 }
 
-export { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, browserPopupRedirectResolver };
+export { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, browserPopupRedirectResolver };
