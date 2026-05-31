@@ -272,6 +272,8 @@ function TabbedPlacesWidget({ expandable = true }) {
     if (res) {
       const label = `Day ${res.dayIndex + 1}`;
       toast.success(res.asHotel ? `Hotel set · ${label}` : `Added to ${label} · ${PHASE_LABEL[res.phase]}`);
+    } else {
+      toast.error("Couldn't add to plan");
     }
     setDetailPlanFor(null);
   };
@@ -801,6 +803,8 @@ function SavedPlacePicker({ listId, onClose, footerSlot }) {
     if (res) {
       const label = `Day ${res.dayIndex + 1}`;
       toast.success(res.asHotel ? `Hotel set · ${label}` : `Added to ${label} · ${PHASE_LABEL[res.phase]}`);
+    } else {
+      toast.error("Couldn't add to plan");
     }
     setPlanFor(null);
   };
