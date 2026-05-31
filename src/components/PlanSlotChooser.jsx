@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { PHASES, PHASE_LABEL } from '../utils/plan';
@@ -29,12 +29,19 @@ export default function PlanSlotChooser({
 
   const dayLabel = useNewDay ? 'new day' : `Day ${day + 1}`;
 
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return createPortal(
     <div className="plan-slot-sheet-backdrop" onClick={onClose}>
       <div
         className="plan-slot-sheet"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
+        aria-modal="true"
         aria-label="Add to plan"
       >
         <div className="plan-slot-sheet-head">
@@ -53,6 +60,7 @@ export default function PlanSlotChooser({
               key={i}
               type="button"
               className={`plan-slot-chip ${!useNewDay && day === i ? 'active' : ''}`}
+              aria-pressed={!useNewDay && day === i}
               onClick={() => { setUseNewDay(false); setDay(i); }}
             >
               Day {i + 1}
@@ -61,6 +69,7 @@ export default function PlanSlotChooser({
           <button
             type="button"
             className={`plan-slot-chip ${useNewDay ? 'active' : ''}`}
+            aria-pressed={useNewDay}
             disabled={atCap}
             title={atCap ? 'Max 30 days' : 'Add a new day'}
             onClick={() => setUseNewDay(true)}
