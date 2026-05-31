@@ -207,10 +207,15 @@ export function findListByCityMode(lists, destination, mode) {
 // Create a real list for (destination, mode) if one doesn't already exist.
 // Prunes empty lists from previous destinations on the way in. Returns the
 // next wishlist + the activated list id.
-export function createListForDestinationMode({ name, destination, mode }) {
+export function createListForDestinationMode({ name, destination, mode, country }) {
   const wishlist = getWishlist();
   const trimmedDestination = destination?.trim() || name?.trim() || 'Untitled wishlist';
   const m = mode === 'plan' ? 'plan' : 'saved';
+  // Country: explicit arg wins; else parse the trailing segment of a
+  // formatted-address destination ("City, Region, Country").
+  const destParts = trimmedDestination.split(',').map((s) => s.trim()).filter(Boolean);
+  const resolvedCountry =
+    country?.trim() || (destParts.length >= 2 ? destParts[destParts.length - 1] : null);
 
   const pruned = wishlist.lists.filter(
     (l) =>
@@ -223,7 +228,11 @@ export function createListForDestinationMode({ name, destination, mode }) {
     (l) => l.mode === m && l.destination?.toLowerCase() === trimmedDestination.toLowerCase()
   );
   if (existing) {
-    const next = persist({ ...wishlist, lists: pruned, activeListId: existing.id });
+    // Backfill country on lists created before we tracked it.
+    const listsOut = !existing.country && resolvedCountry
+      ? pruned.map((l) => (l.id === existing.id ? { ...l, country: resolvedCountry } : l))
+      : pruned;
+    const next = persist({ ...wishlist, lists: listsOut, activeListId: existing.id });
     return { wishlist: next, listId: existing.id };
   }
 
@@ -231,6 +240,7 @@ export function createListForDestinationMode({ name, destination, mode }) {
     id: makeId(),
     name: name?.trim() || trimmedDestination,
     destination: trimmedDestination,
+    country: resolvedCountry,
     mode: m,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -243,6 +253,36 @@ export function createListForDestinationMode({ name, destination, mode }) {
     lists: [list, ...pruned],
   });
   return { wishlist: next, listId: list.id };
+}
+
+// Ensure a plan-mode list exists for a destination WITHOUT changing
+// activeListId. Callers that add to the plan from another mode (Saved picker,
+// detail card) must not shift the active list out from under the user. Does
+// not prune. Returns the existing/created plan list id and a `created` flag.
+export function ensurePlanList({ destination, country }) {
+  const wishlist = getWishlist();
+  const dest = (destination || '').trim();
+  if (!dest) return { wishlist, listId: null, created: false };
+
+  const existing = findListByCityMode(wishlist.lists, dest, 'plan');
+  if (existing) return { wishlist, listId: existing.id, created: false };
+
+  const parts = dest.split(',').map((s) => s.trim()).filter(Boolean);
+  const resolvedCountry =
+    country?.trim() || (parts.length >= 2 ? parts[parts.length - 1] : null);
+  const list = {
+    id: makeId(),
+    name: dest,
+    destination: dest,
+    country: resolvedCountry,
+    mode: 'plan',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    items: [],
+    plan: null,
+  };
+  const next = persist({ ...wishlist, lists: [list, ...wishlist.lists] });
+  return { wishlist: next, listId: list.id, created: true };
 }
 
 // Prune empty lists from previous destinations (called on new search). Does
@@ -348,6 +388,130 @@ export function isPlaceWishlisted(wishlist, listId, query) {
   if (!listId || !query) return false;
   const list = wishlist.lists?.find((item) => item.id === listId);
   return !!findMatchingItem(list?.items, query);
+}
+
+// Backfill `country` for older lists that stored only a city name as
+// `destination` (no country tracked, nothing to parse). Forward-geocodes each
+// unique destination missing a country and stores the trailing country
+// segment. `geocodeFn` is injected (placesProvider.geocodeDestination) to keep
+// this module service-free. `attemptedKeys` (iterable of lowercased
+// destinations already tried) is skipped so a failed/ambiguous lookup isn't
+// re-billed on every load. Returns { wishlist, changed, attempted } —
+// `changed` = lists that gained a country (for cloud upsert), `attempted` =
+// destination keys tried this pass (to persist into the attempted set).
+export async function backfillListCountries(geocodeFn, attemptedKeys = []) {
+  const wishlist = getWishlist();
+  const lists = wishlist.lists || [];
+  const tried = attemptedKeys instanceof Set ? attemptedKeys : new Set(attemptedKeys);
+  const targets = lists.filter(
+    (l) => !l.country && l.destination && !tried.has(l.destination.trim().toLowerCase())
+  );
+  if (targets.length === 0 || typeof geocodeFn !== 'function') {
+    return { wishlist, changed: [], attempted: [] };
+  }
+
+  // Dedupe by destination so the same city isn't geocoded twice.
+  const byKey = new Map();
+  for (const l of targets) {
+    const key = l.destination.trim().toLowerCase();
+    if (!byKey.has(key)) byKey.set(key, l.destination.trim());
+  }
+
+  const countryByKey = new Map();
+  const attempted = [];
+  for (const [key, dest] of byKey) {
+    attempted.push(key);
+    try {
+      const geo = await geocodeFn(dest);
+      // Prefer the geocoder's explicit country field; fall back to the trailing
+      // segment of a formatted address if present.
+      let country = geo?.country || null;
+      if (!country) {
+        const parts = (geo?.formattedAddress || '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (parts.length >= 2) country = parts[parts.length - 1];
+      }
+      if (country) countryByKey.set(key, country);
+    } catch {
+      /* best-effort — skip on failure (key stays attempted, not retried) */
+    }
+  }
+  if (countryByKey.size === 0) return { wishlist, changed: [], attempted };
+
+  const changed = [];
+  const nextLists = lists.map((l) => {
+    if (l.country || !l.destination) return l;
+    const c = countryByKey.get(l.destination.trim().toLowerCase());
+    if (!c) return l;
+    const updated = { ...l, country: c };
+    changed.push(updated);
+    return updated;
+  });
+  if (changed.length === 0) return { wishlist, changed: [], attempted };
+  const next = persist({ ...wishlist, lists: nextLists });
+  return { wishlist: next, changed, attempted };
+}
+
+// One-time rollup: older lists may have been created with a sub-locality name
+// (e.g. "1st arrondissement") because Mapbox reverse-geocode returned the
+// most-specific feature. Forward-geocode each destination; if it resolves to a
+// sub-locality with a parent place, rename the list (name + destination) to
+// that city. `attemptedKeys` skips destinations already processed so it never
+// re-bills. Returns { wishlist, changed, attempted }.
+export async function rollupSubLocalityLists(geocodeFn, attemptedKeys = []) {
+  const wishlist = getWishlist();
+  const lists = wishlist.lists || [];
+  const tried = attemptedKeys instanceof Set ? attemptedKeys : new Set(attemptedKeys);
+  const targets = lists.filter(
+    (l) => l.destination && !tried.has(l.destination.trim().toLowerCase())
+  );
+  if (targets.length === 0 || typeof geocodeFn !== 'function') {
+    return { wishlist, changed: [], attempted: [] };
+  }
+
+  const byKey = new Map();
+  for (const l of targets) {
+    const key = l.destination.trim().toLowerCase();
+    if (!byKey.has(key)) byKey.set(key, l.destination.trim());
+  }
+
+  const rollupByKey = new Map(); // key -> { city, country }
+  const attempted = [];
+  for (const [key, dest] of byKey) {
+    attempted.push(key);
+    try {
+      const geo = await geocodeFn(dest);
+      const parent = geo?.parentPlace;
+      // Only roll up when the parent place differs from the current name.
+      if (parent && parent.trim().toLowerCase() !== key.split(',')[0]) {
+        rollupByKey.set(key, { city: parent.trim(), country: geo?.country || null });
+      }
+    } catch {
+      /* best-effort */
+    }
+  }
+  if (rollupByKey.size === 0) return { wishlist, changed: [], attempted };
+
+  const changed = [];
+  const nextLists = lists.map((l) => {
+    if (!l.destination) return l;
+    const hit = rollupByKey.get(l.destination.trim().toLowerCase());
+    if (!hit) return l;
+    const updated = {
+      ...l,
+      name: hit.city,
+      destination: hit.city,
+      country: l.country || hit.country,
+      updatedAt: Date.now(),
+    };
+    changed.push(updated);
+    return updated;
+  });
+  if (changed.length === 0) return { wishlist, changed: [], attempted };
+  const next = persist({ ...wishlist, lists: nextLists });
+  return { wishlist: next, changed, attempted };
 }
 
 export function replaceWishlist(data) {
