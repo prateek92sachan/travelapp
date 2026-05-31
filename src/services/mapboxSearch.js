@@ -8,44 +8,16 @@
 
 import { MAPBOX_TOKEN } from './config';
 import { increment as usageInc } from '../utils/usageCounter';
-import { loadCache, makeSaver } from '../utils/persistentCache';
+import { makeRevGeoCache } from '../utils/persistentCache';
 
 const GEOCODE_BASE = 'https://api.mapbox.com/geocoding/v5/mapbox.places';
 const SEARCH_BOX_BASE = 'https://api.mapbox.com/search/searchbox/v1';
 const TIMEOUT_MS = 10000;
 
-// Persist mirrors googleMaps.js reverse-geocode cache so reloads don't re-bill.
-// Bucket coords to ~110m, 30min TTL, 200 cap.
-const REV_GEO_TTL_MS = 30 * 60 * 1000;
-const REV_GEO_BUCKET = 0.001;
-const REV_GEO_MAX = 200;
-// Namespace bumped to -en when reverse-geocode switched to language=en; old
-// localized (e.g. Japanese) entries are ignored rather than served stale.
-const REV_GEO_CACHE = loadCache('mb-revgeo-en', REV_GEO_TTL_MS);
-const persistRevGeo = makeSaver('mb-revgeo-en', { max: REV_GEO_MAX, getTime: (v) => v.time });
-
-function revGeoKey(kind, lat, lng) {
-  const q = (n) => (Math.round(n / REV_GEO_BUCKET) * REV_GEO_BUCKET).toFixed(3);
-  return `${kind}:${q(lat)}:${q(lng)}`;
-}
-function revGeoGet(kind, lat, lng) {
-  const key = revGeoKey(kind, lat, lng);
-  const hit = REV_GEO_CACHE.get(key);
-  if (!hit) return undefined;
-  if (Date.now() - hit.time > REV_GEO_TTL_MS) {
-    REV_GEO_CACHE.delete(key);
-    return undefined;
-  }
-  return hit.value;
-}
-function revGeoSet(kind, lat, lng, value) {
-  const key = revGeoKey(kind, lat, lng);
-  REV_GEO_CACHE.set(key, { value, time: Date.now() });
-  if (REV_GEO_CACHE.size > REV_GEO_MAX) {
-    REV_GEO_CACHE.delete(REV_GEO_CACHE.keys().next().value);
-  }
-  persistRevGeo(REV_GEO_CACHE);
-}
+// Mirrors googleMaps.js reverse-geocode cache (own namespace) so reloads don't
+// re-bill. Namespace -en: old localized (e.g. Japanese) entries are ignored
+// rather than served stale. Shared machinery: makeRevGeoCache.
+const { get: revGeoGet, set: revGeoSet } = makeRevGeoCache('mb-revgeo-en');
 
 function firstSegment(s) {
   return (s || '').split(',')[0].trim();

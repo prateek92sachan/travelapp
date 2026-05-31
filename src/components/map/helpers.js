@@ -1,5 +1,38 @@
 import { haversineKm } from '../../utils/geo';
 import { DENSITY_RADIUS_KM, BOX_INSET_FRAC, GRID_CELLS } from './constants';
+import { useWishlistStore } from '../../stores/wishlistStore';
+import { useMapStore } from '../../stores/mapStore';
+
+// Shared pan handler: given a reverse-geocoded place name + locality
+// ({ name, country }), derive the { area, city } chip labels, push them via
+// setPlaceDisplay, and sync the wishlist ghost city + map viewport city.
+// Used by all three map renderers' pan watchers and useTrip's viewport effect
+// (previously duplicated ~25 lines in each). No-op when both inputs are empty.
+export function applyPannedPlace({ name, locality }, setPlaceDisplay) {
+  const localityName = locality?.name || null;
+  if (!name && !localityName) return;
+  let area = name || localityName || '';
+  let city = '';
+  if (name) {
+    const parts = name.split(',').map((s) => s.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      area = parts[0];
+      city = parts[1];
+    } else if (parts.length === 1) {
+      area = parts[0];
+      if (localityName && localityName.toLowerCase() !== parts[0].toLowerCase()) {
+        city = localityName;
+      }
+    }
+  }
+  setPlaceDisplay({ area, city });
+  if (localityName) {
+    const ws = useWishlistStore.getState();
+    if (ws.ghostCity !== localityName) ws.setGhostCity(localityName, locality.country);
+    const ms = useMapStore.getState();
+    if (ms.viewportCity !== localityName) ms.setViewportCity(localityName, locality.country);
+  }
+}
 
 // Centroid of the densest pin cluster within DENSITY_RADIUS_KM.
 export function densestCentroid(pins) {

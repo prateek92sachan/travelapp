@@ -72,3 +72,35 @@ export function clearCache(name) {
     /* ignore */
   }
 }
+
+// Reverse-geocode result cache: coord-bucketed (~110m), TTL'd, localStorage-
+// persisted. Both map providers (Google + Mapbox) cache reverse-geocode lookups
+// identically — only the storage namespace differs — so the machinery lives
+// here once. `get`/`set` are keyed by (kind, lat, lng); `get` returns the
+// stored value or undefined (miss/expired).
+export function makeRevGeoCache(namespace, { ttlMs = 30 * 60 * 1000, bucket = 0.001, max = 200 } = {}) {
+  const cache = loadCache(namespace, ttlMs);
+  const persist = makeSaver(namespace, { max, getTime: (v) => v.time });
+  const keyFor = (kind, lat, lng) => {
+    const q = (n) => (Math.round(n / bucket) * bucket).toFixed(3);
+    return `${kind}:${q(lat)}:${q(lng)}`;
+  };
+  return {
+    get(kind, lat, lng) {
+      const key = keyFor(kind, lat, lng);
+      const hit = cache.get(key);
+      if (!hit) return undefined;
+      if (Date.now() - hit.time > ttlMs) {
+        cache.delete(key);
+        return undefined;
+      }
+      return hit.value;
+    },
+    set(kind, lat, lng, value) {
+      const key = keyFor(kind, lat, lng);
+      cache.set(key, { value, time: Date.now() });
+      if (cache.size > max) cache.delete(cache.keys().next().value);
+      persist(cache);
+    }
+  };
+}

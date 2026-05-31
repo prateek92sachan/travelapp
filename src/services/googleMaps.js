@@ -2,7 +2,7 @@
 // All calls go through the JS SDK once the map is loaded; geocoding uses REST.
 
 import { GOOGLE_MAPS_KEY } from './config';
-import { loadCache, makeSaver, clearCache } from '../utils/persistentCache';
+import { loadCache, makeSaver, clearCache, makeRevGeoCache } from '../utils/persistentCache';
 
 /**
  * Geocode a destination string -> { lat, lng, formattedAddress, name, types, isCountry }.
@@ -63,39 +63,10 @@ export async function geocodeDestination(destination) {
 // Quantize coords to ~110m buckets so near-identical calls hit the cache.
 // TTL 30 min — these names don't change quickly. See milestone Fix 5.
 
-const REV_GEO_TTL_MS = 30 * 60 * 1000;
-const REV_GEO_BUCKET = 0.001; // ≈ 110 m at the equator
-const REV_GEO_MAX = 200;
 // Hydrated from localStorage so reverse-geocode labels survive a reload.
-// Namespace bumped to -en when reverse-geocode switched to language=en; old
-// localized entries are ignored rather than served stale.
-const REV_GEO_CACHE = loadCache('revgeo-en', REV_GEO_TTL_MS);
-const persistRevGeo = makeSaver('revgeo-en', { max: REV_GEO_MAX, getTime: (v) => v.time });
-
-function revGeoKey(kind, lat, lng) {
-  const q = (n) => (Math.round(n / REV_GEO_BUCKET) * REV_GEO_BUCKET).toFixed(3);
-  return `${kind}:${q(lat)}:${q(lng)}`;
-}
-
-function revGeoGet(kind, lat, lng) {
-  const key = revGeoKey(kind, lat, lng);
-  const hit = REV_GEO_CACHE.get(key);
-  if (!hit) return undefined;
-  if (Date.now() - hit.time > REV_GEO_TTL_MS) {
-    REV_GEO_CACHE.delete(key);
-    return undefined;
-  }
-  return hit.value;
-}
-
-function revGeoSet(kind, lat, lng, value) {
-  const key = revGeoKey(kind, lat, lng);
-  REV_GEO_CACHE.set(key, { value, time: Date.now() });
-  if (REV_GEO_CACHE.size > REV_GEO_MAX) {
-    REV_GEO_CACHE.delete(REV_GEO_CACHE.keys().next().value);
-  }
-  persistRevGeo(REV_GEO_CACHE);
-}
+// Namespace -en: reverse-geocode requests language=en; old localized entries
+// are ignored rather than served stale. Shared machinery: makeRevGeoCache.
+const { get: revGeoGet, set: revGeoSet } = makeRevGeoCache('revgeo-en');
 
 // Old cache entries stored a bare city string; new ones store
 // { name, country }. Normalize so consumers always get the object shape.

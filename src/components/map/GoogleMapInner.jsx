@@ -4,7 +4,6 @@ import { GOOGLE_MAPS_MAP_ID } from '../../services/config';
 import { reverseGeocodePlaceName, reverseGeocodeCity } from '../../services/locationService';
 import { useSearchStore } from '../../stores/searchStore';
 import { useMapStore } from '../../stores/mapStore';
-import { useWishlistStore } from '../../stores/wishlistStore';
 import { useTheme } from '../../hooks/useTheme';
 import MapControlsPanel from '../MapControlsPanel';
 import { haversineKm } from '../../utils/geo';
@@ -15,7 +14,7 @@ import {
   VIEWPORT_MIN_MOVE_KM,
   BOX_SEARCH_MIN_ZOOM
 } from './constants';
-import { densestCentroid, insetBounds } from './helpers';
+import { densestCentroid, insetBounds, applyPannedPlace } from './helpers';
 import MapFloatingHeader from './MapFloatingHeader';
 import { useMapData } from './useMapData';
 
@@ -254,31 +253,7 @@ function SearchHereWatcher() {
           reverseGeocodeCity({ lat, lng }).catch(() => null)
         ]);
         if (seq !== requestSeqRef.current) return;
-        const localityName = locality?.name || null;
-        if (!name && !localityName) return;
-
-        let area = name || localityName || '';
-        let city = '';
-        if (name) {
-          const parts = name.split(',').map((s) => s.trim()).filter(Boolean);
-          if (parts.length >= 2) {
-            area = parts[0];
-            city = parts[1];
-          } else if (parts.length === 1) {
-            area = parts[0];
-            if (localityName && localityName.toLowerCase() !== parts[0].toLowerCase()) {
-              city = localityName;
-            }
-          }
-        }
-        setPlaceDisplay({ area, city });
-        // Sync wishlist ghost city + viewport city label on every pan
-        if (localityName) {
-          const ws = useWishlistStore.getState();
-          if (ws.ghostCity !== localityName) ws.setGhostCity(localityName, locality.country);
-          const ms = useMapStore.getState();
-          if (ms.viewportCity !== localityName) ms.setViewportCity(localityName, locality.country);
-        }
+        applyPannedPlace({ name, locality }, setPlaceDisplay);
       }, VIEWPORT_DEBOUNCE_MS);
     };
 
