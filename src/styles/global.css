@@ -2216,6 +2216,22 @@ input { font-family: inherit; }
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
+.wishlist-picker-footer {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.wishlist-manual-link {
+  width: 100%;
+  padding: 6px 0;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  text-align: center;
+  cursor: pointer;
+}
+.wishlist-manual-link:hover { opacity: 0.75; }
 .wishlist-card-list {
   display: grid;
   gap: 8px;

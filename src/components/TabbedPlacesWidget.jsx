@@ -18,6 +18,7 @@ import { fetchWikiSummary, isWikiMatch } from '../services/wikipedia';
 import { usePlaceSummary } from '../hooks/usePlaceSummary';
 import { SavedPlaceCard } from './WishlistPanel';
 import PlanMode from './PlanMode';
+import { PlacePickerModal, PICKER_TABS } from './PlacePickerModal';
 import { formatCount, formatPrice } from '../utils/format';
 import { shortenAddress } from '../utils/shortenAddress';
 import { countPlannedPlaces } from '../utils/plan';
@@ -603,6 +604,98 @@ function WishlistListPicker({
   );
 }
 
+const NOOP_FETCH = () => {};
+
+// Live-POI picker for Saved mode. Mounted only while open so the 5 category
+// queries don't fire (and bill) when closed. Mirrors plan-mode add-session
+// picker but toggles places into the active saved list (multi-add, stays
+// open) and includes hotels. viewport data takes precedence over city tab.
+function SavedPlacePicker({ listId, onClose, footerSlot }) {
+  const activeTab = useSearchStore((s) => s.activeTab);
+  const viewportTarget = useMapStore((s) => s.viewportTarget);
+  const wAddPlace = useWishlistStore((s) => s.addPlace);
+  const wRemovePlace = useWishlistStore((s) => s.removePlace);
+  const items = useWishlistStore(
+    (s) => s.wishlist.lists.find((l) => l.id === listId)?.items
+  );
+
+  const activitiesQ = useTabQuery('activities');
+  const restaurantsQ = useTabQuery('restaurants');
+  const natureQ = useTabQuery('nature');
+  const gemsQ = useTabQuery('gems');
+  const hotelsQ = useTabQuery('hotels');
+  const vpActQ = useViewportQuery({ target: viewportTarget, category: 'activities' });
+  const vpRestQ = useViewportQuery({ target: viewportTarget, category: 'restaurants' });
+  const vpNatQ = useViewportQuery({ target: viewportTarget, category: 'nature' });
+  const vpGemsQ = useViewportQuery({ target: viewportTarget, category: 'gems' });
+  const vpHotelsQ = useViewportQuery({ target: viewportTarget, category: 'hotels' });
+
+  const liveDataByCategory = useMemo(() => {
+    const tab = {
+      activities: activitiesQ.data ?? null,
+      restaurants: restaurantsQ.data ?? null,
+      nature: natureQ.data ?? null,
+      gems: gemsQ.data ?? null,
+      hotels: hotelsQ.data ?? null,
+    };
+    const vp = viewportTarget
+      ? {
+          activities: vpActQ.data ?? null,
+          restaurants: vpRestQ.data ?? null,
+          nature: vpNatQ.data ?? null,
+          gems: vpGemsQ.data ?? null,
+          hotels: vpHotelsQ.data ?? null,
+        }
+      : null;
+    const out = {};
+    for (const t of PICKER_TABS) out[t.key] = (vp && vp[t.key]) || tab[t.key] || null;
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activitiesQ.data, restaurantsQ.data, natureQ.data, gemsQ.data, hotelsQ.data,
+    viewportTarget, vpActQ.data, vpRestQ.data, vpNatQ.data, vpGemsQ.data, vpHotelsQ.data,
+  ]);
+
+  const tabLoading = useMemo(() => ({
+    activities: activitiesQ.isFetching || vpActQ.isFetching,
+    restaurants: restaurantsQ.isFetching || vpRestQ.isFetching,
+    nature: natureQ.isFetching || vpNatQ.isFetching,
+    gems: gemsQ.isFetching || vpGemsQ.isFetching,
+    hotels: hotelsQ.isFetching || vpHotelsQ.isFetching,
+  }), [
+    activitiesQ.isFetching, restaurantsQ.isFetching, natureQ.isFetching, gemsQ.isFetching, hotelsQ.isFetching,
+    vpActQ.isFetching, vpRestQ.isFetching, vpNatQ.isFetching, vpGemsQ.isFetching, vpHotelsQ.isFetching,
+  ]);
+
+  const savedIds = useMemo(() => new Set((items || []).map((i) => i.placeId)), [items]);
+  const plannedSet = useMemo(() => new Set(), []);
+  const isSavedFn = (p) => savedIds.has(p.placeId);
+  const initialTab = PICKER_TABS.some((t) => t.key === activeTab) ? activeTab : 'activities';
+
+  const toggle = (place, category) => {
+    if (savedIds.has(place.placeId)) wRemovePlace({ listId, placeId: place.placeId });
+    else wAddPlace({ listId, place, category });
+  };
+
+  return createPortal(
+    <PlacePickerModal
+      plannedSet={plannedSet}
+      tabs={PICKER_TABS}
+      initialTab={initialTab}
+      liveDataByCategory={liveDataByCategory}
+      tabLoading={tabLoading}
+      fetchTabIfNeeded={NOOP_FETCH}
+      isSavedFn={isSavedFn}
+      onToggleSave={toggle}
+      onPick={({ place, category }) => toggle(place, category)}
+      onClose={onClose}
+      title="Add to saved"
+      footerSlot={footerSlot}
+    />,
+    document.body
+  );
+}
+
 function WishlistBody({
   lists,
   activeList,
@@ -620,6 +713,7 @@ function WishlistBody({
   addFormRef,
   onSelect,
 }) {
+  const [livePickerOpen, setLivePickerOpen] = useState(false);
   const wAddPlace = useWishlistStore((s) => s.addPlace);
   const activeWishlistId = useWishlistStore(selectActiveListId);
   const addPlaceToWishlist = (place, category, listId = activeWishlistId) =>
@@ -720,53 +814,75 @@ function WishlistBody({
           {mode === 'saved' && (
             <button
               type="button"
-              className={`wishlist-add-trigger ${showAddForm ? 'open' : ''}`}
-              onClick={() => setShowAddForm((v) => !v)}
+              className="wishlist-add-trigger"
+              onClick={() => {
+                if (!activeWishlistId) onPromoteGhost();
+                setShowAddForm(false);
+                setLivePickerOpen(true);
+              }}
             >
-              {showAddForm ? '✕' : '+ Add'}
+              + Add
             </button>
           )}
 
-          {mode === 'saved' && showAddForm && (
-            <form ref={addFormRef} className="wishlist-add-form" onSubmit={handleAddSubmit}>
-              <input
-                className="input"
-                placeholder="Place name *"
-                required
-                value={addForm.name}
-                onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))}
-              />
-              <input
-                className="input"
-                placeholder="Location / city"
-                value={addForm.location}
-                onChange={(e) => setAddForm((f) => ({ ...f, location: e.target.value }))}
-              />
-              <select
-                className="input"
-                value={addForm.category}
-                onChange={(e) => setAddForm((f) => ({ ...f, category: e.target.value }))}
-              >
-                {CATEGORY_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-              <div className="wishlist-add-form-row">
-                <input
-                  className="input"
-                  placeholder="Duration (e.g. 2 hrs)"
-                  value={addForm.duration}
-                  onChange={(e) => setAddForm((f) => ({ ...f, duration: e.target.value }))}
-                />
-                <input
-                  className="input"
-                  placeholder="Cost (e.g. $$)"
-                  value={addForm.cost}
-                  onChange={(e) => setAddForm((f) => ({ ...f, cost: e.target.value }))}
-                />
-              </div>
-              <button type="submit" className="btn" style={{ width: '100%' }}>Add to list</button>
-            </form>
+          {mode === 'saved' && livePickerOpen && activeWishlistId && (
+            <SavedPlacePicker
+              listId={activeWishlistId}
+              onClose={() => { setLivePickerOpen(false); setShowAddForm(false); }}
+              footerSlot={
+                <div className="wishlist-picker-footer">
+                  {!showAddForm ? (
+                    <button
+                      type="button"
+                      className="wishlist-manual-link"
+                      onClick={() => setShowAddForm(true)}
+                    >
+                      Can't find it? Add manually
+                    </button>
+                  ) : (
+                    <form ref={addFormRef} className="wishlist-add-form" onSubmit={handleAddSubmit}>
+                      <input
+                        className="input"
+                        placeholder="Place name *"
+                        required
+                        value={addForm.name}
+                        onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))}
+                      />
+                      <input
+                        className="input"
+                        placeholder="Location / city"
+                        value={addForm.location}
+                        onChange={(e) => setAddForm((f) => ({ ...f, location: e.target.value }))}
+                      />
+                      <select
+                        className="input"
+                        value={addForm.category}
+                        onChange={(e) => setAddForm((f) => ({ ...f, category: e.target.value }))}
+                      >
+                        {CATEGORY_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                      <div className="wishlist-add-form-row">
+                        <input
+                          className="input"
+                          placeholder="Duration (e.g. 2 hrs)"
+                          value={addForm.duration}
+                          onChange={(e) => setAddForm((f) => ({ ...f, duration: e.target.value }))}
+                        />
+                        <input
+                          className="input"
+                          placeholder="Cost (e.g. $$)"
+                          value={addForm.cost}
+                          onChange={(e) => setAddForm((f) => ({ ...f, cost: e.target.value }))}
+                        />
+                      </div>
+                      <button type="submit" className="btn" style={{ width: '100%' }}>Add to list</button>
+                    </form>
+                  )}
+                </div>
+              }
+            />
           )}
         </div>
       )}
