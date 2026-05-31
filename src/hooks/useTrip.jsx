@@ -173,8 +173,9 @@ export function TripProvider({ children }) {
       reverseGeocodeCity({ lat, lng }).catch(() => null)
     ]).then(([name, locality]) => {
       if (seq !== placeResolveSeq.current) return;
-      if (!name && !locality) return;
-      let area = name || locality || '';
+      const localityName = locality?.name || null;
+      if (!name && !localityName) return;
+      let area = name || localityName || '';
       let city = '';
       if (name) {
         const parts = name.split(',').map((s) => s.trim()).filter(Boolean);
@@ -183,17 +184,17 @@ export function TripProvider({ children }) {
           city = parts[1];
         } else if (parts.length === 1) {
           area = parts[0];
-          if (locality && locality.toLowerCase() !== parts[0].toLowerCase()) {
-            city = locality;
+          if (localityName && localityName.toLowerCase() !== parts[0].toLowerCase()) {
+            city = localityName;
           }
         }
       }
       setPlaceDisplay({ area, city });
       // Sync wishlist ghost city + viewport city label on every viewport change
-      if (locality) {
+      if (localityName) {
         const ws = useWishlistStore.getState();
-        if (ws.ghostCity !== locality) ws.setGhostCity(locality);
-        if (viewportCity !== locality) setViewportCity(locality);
+        if (ws.ghostCity !== localityName) ws.setGhostCity(localityName, locality.country);
+        if (viewportCity !== localityName) setViewportCity(localityName, locality.country);
       }
     });
   }, [viewportTarget?.lat, viewportTarget?.lng, setPlaceDisplay, viewportCity, setViewportCity]);
@@ -206,6 +207,70 @@ export function TripProvider({ children }) {
     if (date) u.searchParams.set('date', date);
     window.history.replaceState({}, '', u.toString());
   }, [destination, date]);
+
+  // One-time geo reconcile for pre-existing wishlist lists (Plan + Saved):
+  //   (a) backfill `country` for city-only destinations created before we
+  //       tracked it;
+  //   (b) roll up sub-locality names (e.g. "1st arrondissement" → "Paris")
+  //       created when Mapbox reverse-geocode returned the most-specific area.
+  // Runs on mount and whenever the lists change (so cloud-synced lists are
+  // covered too). Each pass keeps its own persisted attempted-destination set
+  // so every city is geocoded at most once ever — no repeat billing on reload.
+  useEffect(() => {
+    // country-tried-v2: v1 ran before geocode exposed a country field.
+    const COUNTRY_KEY = 'travel-app:wishlist:country-tried-v2';
+    const ROLLUP_KEY = 'travel-app:wishlist:rollup-tried-v1';
+    const readTried = (k) => {
+      try { return JSON.parse(localStorage.getItem(k)) || []; } catch { return []; }
+    };
+    const writeTried = (k, keys) => {
+      try { localStorage.setItem(k, JSON.stringify([...new Set(keys)])); } catch {}
+    };
+
+    let running = false;
+    let disposed = false;
+    const run = async () => {
+      if (running || disposed) return;
+      const lists = useWishlistStore.getState().wishlist.lists || [];
+      const countryTried = new Set(readTried(COUNTRY_KEY));
+      const rollupTried = new Set(readTried(ROLLUP_KEY));
+      const needsCountry = lists.some(
+        (l) => !l.country && l.destination && !countryTried.has(l.destination.trim().toLowerCase())
+      );
+      const needsRollup = lists.some(
+        (l) => l.destination && !rollupTried.has(l.destination.trim().toLowerCase())
+      );
+      if (!needsCountry && !needsRollup) return;
+      running = true;
+      try {
+        if (needsRollup) {
+          const { attempted } = await useWishlistStore
+            .getState()
+            .rollupSubLocalities(geocodeDestination, [...rollupTried]);
+          if (attempted.length) writeTried(ROLLUP_KEY, [...rollupTried, ...attempted]);
+        }
+        if (needsCountry) {
+          const tried = readTried(COUNTRY_KEY);
+          const { attempted } = await useWishlistStore
+            .getState()
+            .backfillCountries(geocodeDestination, tried);
+          if (attempted.length) writeTried(COUNTRY_KEY, [...tried, ...attempted]);
+        }
+      } finally {
+        running = false;
+      }
+    };
+
+    run();
+    let prevLists = useWishlistStore.getState().wishlist.lists;
+    const unsub = useWishlistStore.subscribe((s) => {
+      if (s.wishlist.lists !== prevLists) {
+        prevLists = s.wishlist.lists;
+        run();
+      }
+    });
+    return () => { disposed = true; unsub(); };
+  }, []);
 
   // On sign-in: migrate legacy v3 blob → v4 subcollections (one-shot, idempotent),
   // hydrate local stores from cloud, then install per-mutation cloud writers.
@@ -369,7 +434,7 @@ export function TripProvider({ children }) {
         // exploration artifact — reset it too so the "Save to <city>" target
         // doesn't keep showing the previously-panned city after searching anew.
         setViewportTarget(null);
-        setViewportCity(null);
+        setViewportCity(null, null);
         // Wipe the API-level viewport cache too — old city's data is irrelevant
         clearViewportCache();
       }
@@ -680,11 +745,11 @@ export function TripProvider({ children }) {
       setWeatherTarget({ lat, lng, dateISO: useSearchStore.getState().date });
       refreshViewport({ lat, lng, radiusMeters, bounds });
       const city = await reverseGeocodeCity({ lat, lng }).catch(() => null);
-      if (city) {
-        setViewportCity(city);
+      if (city?.name) {
+        setViewportCity(city.name, city.country);
         // Update ghost so the wishlist's + Add button + ghost chip track
         // the panned-to city live.
-        useWishlistStore.getState().setGhostCity(city);
+        useWishlistStore.getState().setGhostCity(city.name, city.country);
       }
     },
     [refreshViewport, setWeatherTarget, setViewportCity]
@@ -799,7 +864,7 @@ export function TripProvider({ children }) {
     ]
   );
 
-  const searchCtx = useMemo(() => ({ search }), [search]);
+  const searchCtx = useMemo(() => ({ search, searchHere }), [search, searchHere]);
 
   return (
     <TripSearchContext.Provider value={searchCtx}>
@@ -820,4 +885,13 @@ export function useTripSearch() {
   const ctx = useContext(TripSearchContext);
   if (!ctx) throw new Error('useTripSearch must be used inside TripProvider');
   return ctx.search;
+}
+
+// Returns just `searchHere` (box/viewport search with free weather + city-label
+// updates). Lives on the lightweight search context so subscribers do NOT
+// re-render when other TripContext fields change.
+export function useTripSearchHere() {
+  const ctx = useContext(TripSearchContext);
+  if (!ctx) throw new Error('useTripSearchHere must be used inside TripProvider');
+  return ctx.searchHere;
 }

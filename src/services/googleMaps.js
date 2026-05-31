@@ -34,10 +34,13 @@ export async function geocodeDestination(destination) {
   const r = data.results[0];
   const types = r.types || [];
   const vp = r.geometry.viewport;
+  const country =
+    (r.address_components || []).find((c) => (c.types || []).includes('country'))?.long_name || null;
   return {
     lat: r.geometry.location.lat,
     lng: r.geometry.location.lng,
     formattedAddress: r.formatted_address,
+    country,
     name: destination,
     placeId: r.place_id,
     types,
@@ -64,8 +67,10 @@ const REV_GEO_TTL_MS = 30 * 60 * 1000;
 const REV_GEO_BUCKET = 0.001; // ≈ 110 m at the equator
 const REV_GEO_MAX = 200;
 // Hydrated from localStorage so reverse-geocode labels survive a reload.
-const REV_GEO_CACHE = loadCache('revgeo', REV_GEO_TTL_MS);
-const persistRevGeo = makeSaver('revgeo', { max: REV_GEO_MAX, getTime: (v) => v.time });
+// Namespace bumped to -en when reverse-geocode switched to language=en; old
+// localized entries are ignored rather than served stale.
+const REV_GEO_CACHE = loadCache('revgeo-en', REV_GEO_TTL_MS);
+const persistRevGeo = makeSaver('revgeo-en', { max: REV_GEO_MAX, getTime: (v) => v.time });
 
 function revGeoKey(kind, lat, lng) {
   const q = (n) => (Math.round(n / REV_GEO_BUCKET) * REV_GEO_BUCKET).toFixed(3);
@@ -92,15 +97,24 @@ function revGeoSet(kind, lat, lng, value) {
   persistRevGeo(REV_GEO_CACHE);
 }
 
-// Reverse geocode a lat/lng to a city name (locality or admin level 2).
-// Returns null on failure — always safe to ignore.
+// Old cache entries stored a bare city string; new ones store
+// { name, country }. Normalize so consumers always get the object shape.
+function asCityInfo(v) {
+  if (v == null) return null;
+  if (typeof v === 'string') return { name: v, country: null };
+  return v;
+}
+
+// Reverse geocode a lat/lng to { name, country } (locality or admin level 2 +
+// country). Returns null on failure — always safe to ignore.
 export async function reverseGeocodeCity({ lat, lng }) {
   const cached = revGeoGet('city', lat, lng);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) return asCityInfo(cached);
   const url =
     `https://maps.googleapis.com/maps/api/geocode/json` +
     `?latlng=${lat},${lng}` +
     `&result_type=locality|administrative_area_level_2` +
+    `&language=en` +
     `&key=${GOOGLE_MAPS_KEY}`;
   try {
     const controller = new AbortController();
@@ -112,7 +126,13 @@ export async function reverseGeocodeCity({ lat, lng }) {
     const components = data.results[0].address_components || [];
     const locality = components.find((c) => c.types.includes('locality'));
     const level2 = components.find((c) => c.types.includes('administrative_area_level_2'));
-    const value = locality?.long_name || level2?.long_name || null;
+    const country = components.find((c) => c.types.includes('country'));
+    const name = locality?.long_name || level2?.long_name || null;
+    if (!name) {
+      revGeoSet('city', lat, lng, null);
+      return null;
+    }
+    const value = { name, country: country?.long_name || null };
     revGeoSet('city', lat, lng, value);
     return value;
   } catch {
@@ -131,6 +151,7 @@ export async function reverseGeocodePlaceName({ lat, lng }) {
     `https://maps.googleapis.com/maps/api/geocode/json` +
     `?latlng=${lat},${lng}` +
     `&result_type=neighborhood|sublocality|locality|administrative_area_level_2` +
+    `&language=en` +
     `&key=${GOOGLE_MAPS_KEY}`;
   try {
     const controller = new AbortController();
@@ -245,14 +266,19 @@ async function placesTextSearch({ textQuery, lat, lng, radiusMeters, fetchCount,
       textQuery,
       maxResultCount: fetchCount
     };
-    if (bounds) {
+    // Prefer a hard rectangle restriction. Explicit `bounds` (viewport
+    // search) wins; otherwise derive one from center+radius so category
+    // searches can't leak strong name-matches far outside the area.
+    const rect = bounds || rectFromCenterRadius(lat, lng, radiusMeters);
+    if (rect) {
       body.locationRestriction = {
         rectangle: {
-          low:  { latitude: bounds.low.lat,  longitude: bounds.low.lng  },
-          high: { latitude: bounds.high.lat, longitude: bounds.high.lng }
+          low:  { latitude: rect.low.lat,  longitude: rect.low.lng  },
+          high: { latitude: rect.high.lat, longitude: rect.high.lng }
         }
       };
     } else {
+      // No usable coords — soft bias only (last resort).
       body.locationBias = {
         circle: {
           center: { latitude: lat, longitude: lng },
@@ -280,6 +306,39 @@ async function placesTextSearch({ textQuery, lat, lng, radiusMeters, fetchCount,
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ---- Geo helpers ----------------------------------------------------------
+
+const EARTH_M_PER_DEG = 111320; // metres per degree latitude (≈ at equator)
+
+// Build a lat/lng rectangle circumscribing the circle of `radiusMeters`
+// around (lat,lng). Used as a hard locationRestriction so text-search can't
+// return strong name-matches far outside the searched area. Corners sit at
+// ~1.41× radius; the haversine post-filter then trims them to the true circle.
+function rectFromCenterRadius(lat, lng, radiusMeters) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !(radiusMeters > 0)) {
+    return null;
+  }
+  const latDelta = radiusMeters / EARTH_M_PER_DEG;
+  const cos = Math.cos((lat * Math.PI) / 180);
+  const lngDelta = radiusMeters / (EARTH_M_PER_DEG * Math.max(0.01, Math.abs(cos)));
+  return {
+    low:  { lat: lat - latDelta, lng: lng - lngDelta },
+    high: { lat: lat + latDelta, lng: lng + lngDelta }
+  };
+}
+
+// Haversine distance in metres between two lat/lng points.
+function distanceMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
 }
 
 // ---- Ranking helpers ------------------------------------------------------
@@ -386,13 +445,28 @@ async function fetchAndRank({
   filterOpts,
   customFilter
 }) {
-  const raw = await placesTextSearch({
+  const rawAll = await placesTextSearch({
     textQuery,
     lat,
     lng,
     radiusMeters,
     fetchCount
   });
+
+  // Exact-circle trim: the hard rectangle restriction is square, so its
+  // corners reach ~1.41× radius. Drop anything beyond radiusMeters from the
+  // center so a strong name-match in the corner (e.g. a far outlier pin)
+  // can't survive. No-op when coords/radius missing.
+  const canTrim =
+    Number.isFinite(lat) && Number.isFinite(lng) && radiusMeters > 0;
+  const raw = canTrim
+    ? rawAll.filter((p) => {
+        const plat = p.location?.latitude;
+        const plng = p.location?.longitude;
+        if (!Number.isFinite(plat) || !Number.isFinite(plng)) return false;
+        return distanceMeters(lat, lng, plat, plng) <= radiusMeters;
+      })
+    : rawAll;
 
   const filterFn = customFilter
     ? customFilter

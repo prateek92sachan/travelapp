@@ -12,9 +12,10 @@ import {
   CATEGORY_CONFIG,
   CATEGORY_KEYS,
   VIEWPORT_DEBOUNCE_MS,
-  VIEWPORT_MIN_MOVE_KM
+  VIEWPORT_MIN_MOVE_KM,
+  BOX_SEARCH_MIN_ZOOM
 } from './constants';
-import { densestCentroid } from './helpers';
+import { densestCentroid, insetBounds } from './helpers';
 import MapFloatingHeader from './MapFloatingHeader';
 import { useMapData } from './useMapData';
 
@@ -29,15 +30,22 @@ export default function GoogleMapInner({
     tabData,
     markersForCat,
     onPinTap,
-    handleSearchHereClick,
+    cityWideSearch,
+    boxSearchHere,
     clearViewportItems,
     actionsDisabled
   } = useMapData();
 
+  // The button lives OUTSIDE <Map>, so it can't hold a useMap() handle.
+  // Bridge to BoxSearchWatcher (inside <Map>) via the window event bus.
+  const onSearchHere = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('travelapp:requestBoxSearch'));
+  }, []);
+
   return (
     <div className="map-container">
       <MapFloatingHeader
-        onSearchHere={handleSearchHereClick}
+        onSearchHere={onSearchHere}
         onClearViewport={clearViewportItems}
         actionsDisabled={actionsDisabled}
         searchLoading={loading}
@@ -59,7 +67,7 @@ export default function GoogleMapInner({
       >
         {CATEGORY_KEYS.map((cat) =>
           visibleCategories[cat]
-            ? markersForCat(cat).slice(0, 5).map((poi, i) => (
+            ? markersForCat(cat).map((poi, i) => (
                 <MemoPOIMarker
                   key={poi.placeId}
                   poi={poi}
@@ -78,6 +86,7 @@ export default function GoogleMapInner({
         <FocusListener />
         <TransitLayer />
         <SearchHereWatcher />
+        <BoxSearchWatcher boxSearchHere={boxSearchHere} cityWideSearch={cityWideSearch} />
       </Map>
 
       <MapControlsPanel />
@@ -245,9 +254,10 @@ function SearchHereWatcher() {
           reverseGeocodeCity({ lat, lng }).catch(() => null)
         ]);
         if (seq !== requestSeqRef.current) return;
-        if (!name && !locality) return;
+        const localityName = locality?.name || null;
+        if (!name && !localityName) return;
 
-        let area = name || locality || '';
+        let area = name || localityName || '';
         let city = '';
         if (name) {
           const parts = name.split(',').map((s) => s.trim()).filter(Boolean);
@@ -256,18 +266,18 @@ function SearchHereWatcher() {
             city = parts[1];
           } else if (parts.length === 1) {
             area = parts[0];
-            if (locality && locality.toLowerCase() !== parts[0].toLowerCase()) {
-              city = locality;
+            if (localityName && localityName.toLowerCase() !== parts[0].toLowerCase()) {
+              city = localityName;
             }
           }
         }
         setPlaceDisplay({ area, city });
         // Sync wishlist ghost city + viewport city label on every pan
-        if (locality) {
+        if (localityName) {
           const ws = useWishlistStore.getState();
-          if (ws.ghostCity !== locality) ws.setGhostCity(locality);
+          if (ws.ghostCity !== localityName) ws.setGhostCity(localityName, locality.country);
           const ms = useMapStore.getState();
-          if (ms.viewportCity !== locality) ms.setViewportCity(locality);
+          if (ms.viewportCity !== localityName) ms.setViewportCity(localityName, locality.country);
         }
       }, VIEWPORT_DEBOUNCE_MS);
     };
@@ -279,6 +289,48 @@ function SearchHereWatcher() {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [map, setPlaceDisplay]);
+
+  return null;
+}
+
+// ---- Box-search watcher (mounted inside <Map>) --------------------------
+// Bridges the "Search here" button (rendered outside <Map>) to the live map
+// handle. On `travelapp:requestBoxSearch`: below the zoom gate, falls back to
+// city-wide text search; otherwise searches ONLY the inset visible viewport.
+function BoxSearchWatcher({ boxSearchHere, cityWideSearch }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const onRequest = () => {
+      if (!map) {
+        cityWideSearch();
+        return;
+      }
+      const zoom = map.getZoom();
+      if (typeof zoom === 'number' && zoom < BOX_SEARCH_MIN_ZOOM) {
+        cityWideSearch();
+        return;
+      }
+      const b = map.getBounds();
+      if (!b) {
+        cityWideSearch();
+        return;
+      }
+      const ne = b.getNorthEast();
+      const sw = b.getSouthWest();
+      const raw = {
+        low: { lat: sw.lat(), lng: sw.lng() },
+        high: { lat: ne.lat(), lng: ne.lng() }
+      };
+      const bounds = insetBounds(raw);
+      const lat = (bounds.low.lat + bounds.high.lat) / 2;
+      const lng = (bounds.low.lng + bounds.high.lng) / 2;
+      boxSearchHere({ lat, lng, bounds });
+    };
+
+    window.addEventListener('travelapp:requestBoxSearch', onRequest);
+    return () => window.removeEventListener('travelapp:requestBoxSearch', onRequest);
+  }, [map, boxSearchHere, cityWideSearch]);
 
   return null;
 }

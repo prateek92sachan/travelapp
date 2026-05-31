@@ -12,9 +12,10 @@ import { haversineKm } from '../../utils/geo';
 import {
   CATEGORY_KEYS,
   VIEWPORT_DEBOUNCE_MS,
-  VIEWPORT_MIN_MOVE_KM
+  VIEWPORT_MIN_MOVE_KM,
+  BOX_SEARCH_MIN_ZOOM
 } from './constants';
-import { densestCentroid } from './helpers';
+import { densestCentroid, insetBounds } from './helpers';
 import { mapboxStyleFor, POIMarker } from './mapboxShared';
 import MapFloatingHeader from './MapFloatingHeader';
 import { useMapData } from './useMapData';
@@ -31,7 +32,8 @@ export default function MapboxMapInner({
     tabData,
     markersForCat,
     onPinTap,
-    handleSearchHereClick,
+    cityWideSearch,
+    boxSearchHere,
     clearViewportItems,
     actionsDisabled
   } = useMapData();
@@ -44,6 +46,23 @@ export default function MapboxMapInner({
   function getMap() {
     return mapRef.current?.getMap?.() || null;
   }
+
+  const onSearchHere = useCallback(() => {
+    const map = getMap();
+    if (!map) { cityWideSearch(); return; }
+    const zoom = map.getZoom();
+    if (typeof zoom === 'number' && zoom < BOX_SEARCH_MIN_ZOOM) { cityWideSearch(); return; }
+    const b = map.getBounds();
+    if (!b) { cityWideSearch(); return; }
+    const raw = {
+      low:  { lat: b.getSouth(), lng: b.getWest() },
+      high: { lat: b.getNorth(), lng: b.getEast() }
+    };
+    const bounds = insetBounds(raw);
+    const lat = (bounds.low.lat + bounds.high.lat) / 2;
+    const lng = (bounds.low.lng + bounds.high.lng) / 2;
+    boxSearchHere({ lat, lng, bounds });
+  }, [boxSearchHere, cityWideSearch]);
 
   // ---- Center sync: pan on prop change + travelapp:panToCity event --------
   useEffect(() => {
@@ -183,8 +202,9 @@ export default function MapboxMapInner({
         reverseGeocodeCity({ lat: next.lat, lng: next.lng }).catch(() => null)
       ]);
       if (seq !== shSeqRef.current) return;
-      if (!name && !locality) return;
-      let area = name || locality || '';
+      const localityName = locality?.name || null;
+      if (!name && !localityName) return;
+      let area = name || localityName || '';
       let city = '';
       if (name) {
         const parts = name.split(',').map((s) => s.trim()).filter(Boolean);
@@ -193,18 +213,18 @@ export default function MapboxMapInner({
           city = parts[1];
         } else if (parts.length === 1) {
           area = parts[0];
-          if (locality && locality.toLowerCase() !== parts[0].toLowerCase()) {
-            city = locality;
+          if (localityName && localityName.toLowerCase() !== parts[0].toLowerCase()) {
+            city = localityName;
           }
         }
       }
       setPlaceDisplay({ area, city });
       // Sync wishlist ghost city + viewport city label on every pan
-      if (locality) {
+      if (localityName) {
         const ws = useWishlistStore.getState();
-        if (ws.ghostCity !== locality) ws.setGhostCity(locality);
+        if (ws.ghostCity !== localityName) ws.setGhostCity(localityName, locality.country);
         const ms = useMapStore.getState();
-        if (ms.viewportCity !== locality) ms.setViewportCity(locality);
+        if (ms.viewportCity !== localityName) ms.setViewportCity(localityName, locality.country);
       }
     }, VIEWPORT_DEBOUNCE_MS);
   }, [setPlaceDisplay]);
@@ -212,7 +232,7 @@ export default function MapboxMapInner({
   return (
     <div className="map-container">
       <MapFloatingHeader
-        onSearchHere={handleSearchHereClick}
+        onSearchHere={onSearchHere}
         onClearViewport={clearViewportItems}
         actionsDisabled={actionsDisabled}
         searchLoading={loading}
@@ -229,7 +249,7 @@ export default function MapboxMapInner({
       >
         {CATEGORY_KEYS.map((cat) =>
           visibleCategories[cat]
-            ? markersForCat(cat).slice(0, 5).map((poi, i) => (
+            ? markersForCat(cat).map((poi, i) => (
                 <POIMarker
                   key={poi.placeId}
                   poi={poi}

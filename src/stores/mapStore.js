@@ -38,6 +38,7 @@ export const useMapStore = create((set, get) => ({
   // Map-mode state (where the map is "focused")
   viewportTarget: null, // { lat, lng, radiusMeters, bounds } | null
   viewportCity: null, // reverse-geocoded city name from last pan
+  viewportCountry: null, // reverse-geocoded country for the viewport city
 
   setMapProvider: (provider) => {
     if (!VALID_PROVIDERS.has(provider)) return;
@@ -63,7 +64,8 @@ export const useMapStore = create((set, get) => ({
     })),
 
   setViewportTarget: (v) => set({ viewportTarget: v }),
-  setViewportCity: (v) => set({ viewportCity: v }),
+  setViewportCity: (v, country) =>
+    set(country === undefined ? { viewportCity: v } : { viewportCity: v, viewportCountry: country || null }),
 
   // Pan refresh — sets viewport target.
   refreshViewport: ({ lat, lng, radiusMeters, bounds }) => {
@@ -85,7 +87,7 @@ export const useMapStore = create((set, get) => ({
   // city's coords. Wraps `clearViewportTarget` because the pan-to-city event
   // is part of the same UX (exit "search here" mode → return to destination).
   clearViewportItems: () => {
-    set({ viewportTarget: null, viewportCity: null });
+    set({ viewportTarget: null, viewportCity: null, viewportCountry: null });
     const c = useSearchStore.getState().coords;
     if (c) {
       window.dispatchEvent(

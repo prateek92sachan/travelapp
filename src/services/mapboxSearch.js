@@ -19,8 +19,10 @@ const TIMEOUT_MS = 10000;
 const REV_GEO_TTL_MS = 30 * 60 * 1000;
 const REV_GEO_BUCKET = 0.001;
 const REV_GEO_MAX = 200;
-const REV_GEO_CACHE = loadCache('mb-revgeo', REV_GEO_TTL_MS);
-const persistRevGeo = makeSaver('mb-revgeo', { max: REV_GEO_MAX, getTime: (v) => v.time });
+// Namespace bumped to -en when reverse-geocode switched to language=en; old
+// localized (e.g. Japanese) entries are ignored rather than served stale.
+const REV_GEO_CACHE = loadCache('mb-revgeo-en', REV_GEO_TTL_MS);
+const persistRevGeo = makeSaver('mb-revgeo-en', { max: REV_GEO_MAX, getTime: (v) => v.time });
 
 function revGeoKey(kind, lat, lng) {
   const q = (n) => (Math.round(n / REV_GEO_BUCKET) * REV_GEO_BUCKET).toFixed(3);
@@ -88,10 +90,23 @@ export async function geocodeDestinationMapbox(destination) {
     const types = f.place_type || [];
     const [lng, lat] = f.center || [];
     const bbox = f.bbox || null;
+    // Country: a country-type result is its own country; otherwise pull it from
+    // the feature's context array (id like "country.123").
+    const country = types.includes('country')
+      ? firstSegment(f.place_name)
+      : (f.context || []).find((c) => /^country\./.test(c.id))?.text || null;
+    // Parent place when the match is a sub-locality (arrondissement/ward) — lets
+    // callers roll a sub-area up to its city.
+    const parentPlace =
+      types.includes('locality') && !types.includes('place')
+        ? (f.context || []).find((c) => /^place\./.test(c.id))?.text || null
+        : null;
     return {
       lat,
       lng,
       formattedAddress: firstSegment(f.place_name),
+      country,
+      parentPlace,
       name: destination,
       placeId: f.id,
       types,
@@ -107,14 +122,23 @@ export async function geocodeDestinationMapbox(destination) {
 
 // ---- Reverse geocode --------------------------------------------------------
 
+// Old cache entries stored a bare city string; new ones store
+// { name, country }. Normalize so consumers always get the object shape.
+function asCityInfo(v) {
+  if (v == null) return null;
+  if (typeof v === 'string') return { name: v, country: null };
+  return v;
+}
+
 export async function reverseGeocodeCityMapbox({ lat, lng } = {}) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   assertToken();
   const cached = revGeoGet('city', lat, lng);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) return asCityInfo(cached);
   const url =
     `${GEOCODE_BASE}/${lng},${lat}.json` +
     `?access_token=${MAPBOX_TOKEN}` +
+    `&language=en` +
     `&types=place,locality` +
     `&limit=1`;
   const { signal, clear } = timeoutSignal();
@@ -124,7 +148,23 @@ export async function reverseGeocodeCityMapbox({ lat, lng } = {}) {
     if (!res.ok) throw new Error(`Mapbox reverse-geocode failed: ${res.status}`);
     const data = await res.json();
     const f = data.features?.[0];
-    const value = f ? firstSegment(f.text || f.place_name) : null;
+    if (!f) {
+      revGeoSet('city', lat, lng, null);
+      return null;
+    }
+    // Country lives in the feature's context array (id like "country.123").
+    const ctx = f.context || [];
+    const country = ctx.find((c) => /^country\./.test(c.id))?.text || null;
+    // City label = the `place` (e.g. Paris). When the most-specific feature is
+    // a sub-locality (Paris arrondissement, Tokyo ward), climb to the parent
+    // `place` in context so the chip shows the city, not the sub-area.
+    const ptypes = f.place_type || [];
+    let name = firstSegment(f.text || f.place_name);
+    if (ptypes.includes('locality') && !ptypes.includes('place')) {
+      const parentPlace = ctx.find((c) => /^place\./.test(c.id))?.text;
+      if (parentPlace) name = parentPlace;
+    }
+    const value = { name, country };
     revGeoSet('city', lat, lng, value);
     return value;
   } finally {
@@ -142,6 +182,7 @@ export async function reverseGeocodePlaceNameMapbox({ lat, lng } = {}) {
   const url =
     `${GEOCODE_BASE}/${lng},${lat}.json` +
     `?access_token=${MAPBOX_TOKEN}` +
+    `&language=en` +
     `&types=neighborhood,locality,place,district`;
   const { signal, clear } = timeoutSignal();
   try {
@@ -157,11 +198,17 @@ export async function reverseGeocodePlaceNameMapbox({ lat, lng } = {}) {
     const types = feature.place_type || [];
     const primary = feature.text;
     let value = primary;
-    // Append parent locality when primary is a neighborhood (Shibuya, Tokyo).
-    if (types.includes('neighborhood')) {
+    // Append parent city when primary is smaller than a city — neighborhood,
+    // locality, or district (e.g. "Upli Bari, Udaipur"). Mapbox returns the
+    // bare sub-area with the city only in context, so the summary's city line
+    // was blank for these. Skip when primary is itself a place/city so we don't
+    // append the region ("Udaipur, Rajasthan").
+    if (!types.includes('place')) {
       const context = feature.context || [];
-      const parent = context.find((c) => /^(place|locality)\./.test(c.id))?.text;
-      if (parent && parent !== primary) value = `${primary}, ${parent}`;
+      const parent = context.find((c) => /^place\./.test(c.id))?.text;
+      if (parent && parent.toLowerCase() !== primary.toLowerCase()) {
+        value = `${primary}, ${parent}`;
+      }
     }
     revGeoSet('placeName', lat, lng, value);
     return value;

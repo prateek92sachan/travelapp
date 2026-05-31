@@ -1,9 +1,11 @@
 import { useCallback, useMemo } from 'react';
-import { useTripSearch } from '../../hooks/useTrip';
+import { useTripSearch, useTripSearchHere } from '../../hooks/useTrip';
 import { useSearchStore } from '../../stores/searchStore';
 import { useMapStore } from '../../stores/mapStore';
 import { useTabQuery } from '../../hooks/queries/useTabQuery';
 import { useViewportQuery } from '../../hooks/queries/useViewportQuery';
+import { gridSpread } from './helpers';
+import { GRID_CELLS } from './constants';
 
 // Provider-agnostic data + callback assembly for map renderers.
 // Returns everything a renderer needs to draw markers + wire actions, without
@@ -12,6 +14,7 @@ export function useMapData() {
   const selectPlace = useSearchStore((s) => s.selectPlace);
   const clearViewportItems = useMapStore((s) => s.clearViewportItems);
   const search = useTripSearch();
+  const searchHere = useTripSearchHere();
 
   const loading = useSearchStore((s) => s.loading);
   const selectedPlaceId = useSearchStore((s) => s.selectedPlaceId);
@@ -60,8 +63,9 @@ export function useMapData() {
     };
   }, [viewportTarget, vpAct, vpRest, vpNat, vpGems, vpHotels]);
 
-  // Click "Search here" → search the current map-center location.
-  const handleSearchHereClick = useCallback(() => {
+  // City-wide text search of the current map-center location's city/area.
+  // Used as the fallback when the user is zoomed out past BOX_SEARCH_MIN_ZOOM.
+  const cityWideSearch = useCallback(() => {
     const { placeArea, placeCity, destination } = useSearchStore.getState();
     const parts = [placeArea, placeCity].filter(Boolean);
     const override = parts.length ? parts.join(', ') : destination;
@@ -69,15 +73,39 @@ export function useMapData() {
     search({ destination: override });
   }, [search]);
 
+  // Box search: search ONLY the supplied visible-viewport rectangle.
+  // Reuses useTrip.searchHere (via the lightweight search context) for free
+  // weather-target + city-label updates; falls back to refreshViewport if the
+  // search context is unavailable.
+  const boxSearchHere = useCallback(
+    ({ lat, lng, bounds }) => {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      if (searchHere) searchHere({ lat, lng, bounds });
+      else useMapStore.getState().refreshViewport({ lat, lng, bounds });
+    },
+    [searchHere]
+  );
+
+  // Back-compat alias: existing callers of handleSearchHereClick still get the
+  // city-wide behavior. New box-search flow uses boxSearchHere/cityWideSearch.
+  const handleSearchHereClick = cityWideSearch;
+
   const actionsDisabled = loading;
 
-  // Source priority: viewport (all 4 cats) > city-wide tabData
+  // Source priority: viewport (all cats) > city-wide tabData.
+  // Declutter is centralized HERE so all renderers benefit and stop slicing:
+  //  - viewport mode → grid-cap spread within the viewport bounds, capped at 5
+  //  - city mode     → first 5
   const markersForCat = useCallback(
     (cat) => {
-      if (viewportItems) return viewportItems[cat] || [];
-      return tabData[cat] || [];
+      if (viewportItems) {
+        const items = viewportItems[cat] || [];
+        const bounds = viewportTarget?.bounds;
+        return bounds ? gridSpread(items, bounds, GRID_CELLS, 1, 5) : items.slice(0, 5);
+      }
+      return (tabData[cat] || []).slice(0, 5);
     },
-    [viewportItems, tabData]
+    [viewportItems, viewportTarget, tabData]
   );
 
   return {
@@ -89,6 +117,8 @@ export function useMapData() {
     markersForCat,
     onPinTap,
     handleSearchHereClick,
+    cityWideSearch,
+    boxSearchHere,
     clearViewportItems,
     actionsDisabled
   };

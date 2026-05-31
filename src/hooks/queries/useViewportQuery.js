@@ -4,6 +4,7 @@ import { useMapStore } from '../../stores/mapStore';
 import { useSearchStore } from '../../stores/searchStore';
 import { queryClient } from '../../lib/queryClient';
 import { backfillPhotosWithWiki } from '../../services/wikipedia';
+import { BOX_FETCH_LIMIT } from '../../components/map/constants';
 
 export const VIEWPORT_CATEGORIES = ['activities', 'restaurants', 'nature', 'gems', 'hotels'];
 
@@ -43,7 +44,11 @@ export function useViewportQuery({ target, category }) {
         lng: target.lng,
         radiusMeters: target.radiusMeters || 5000,
         category,
-        bounds: target.bounds || null
+        bounds: target.bounds || null,
+        // Fetch extra candidates (15) so gridSpread has enough to declutter;
+        // display still caps at 5. viewportCacheKey includes `limit`, so this
+        // is cache-safe.
+        limit: BOX_FETCH_LIMIT
       });
       if (Array.isArray(items) && items.length) {
         backfillPhotosWithWiki(items, destination)
