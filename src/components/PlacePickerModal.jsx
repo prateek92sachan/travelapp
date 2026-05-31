@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, useEffect } from 'react';
+import { memo, useMemo, useState, useEffect, useRef } from 'react';
 import {
   BedDouble,
   X,
@@ -8,6 +8,7 @@ import {
   Utensils,
   Leaf,
   Gem,
+  CalendarPlus,
 } from 'lucide-react';
 import { formatCount } from '../utils/format';
 
@@ -21,7 +22,7 @@ export const PICKER_TABS = [
 export const SESSION_TABS = PICKER_TABS.filter((t) => t.key !== 'hotels');
 export const TAB_BY_KEY = Object.fromEntries(PICKER_TABS.map((t) => [t.key, t]));
 
-export const LightPickerRow = memo(function LightPickerRow({ place, category, planned, selected, saved, onToggleSave, onPick, showCategoryChip }) {
+export const LightPickerRow = memo(function LightPickerRow({ place, category, planned, selected, saved, onToggleSave, onPick, onAddToPlan, showCategoryChip }) {
   const tab = TAB_BY_KEY[category];
   const description = place.wiki?.extract || place.summary;
   const truncatedDesc = description?.length > 110
@@ -78,16 +79,29 @@ export const LightPickerRow = memo(function LightPickerRow({ place, category, pl
           </div>
         </div>
       </button>
-      <button
-        type="button"
-        className={`picker-fav-toggle ${saved ? 'on' : ''}`}
-        onClick={(e) => { e.stopPropagation(); onToggleSave(); }}
-        aria-pressed={saved}
-        aria-label={saved ? 'Remove from wishlist' : 'Save to wishlist'}
-        title={saved ? 'Saved to wishlist (tap to remove)' : 'Save to wishlist'}
-      >
-        <Star size={14} strokeWidth={2} fill={saved ? 'currentColor' : 'none'} aria-hidden />
-      </button>
+      <div className="picker-row-actions">
+        {onAddToPlan && (
+          <button
+            type="button"
+            className="picker-plan-add"
+            onClick={(e) => { e.stopPropagation(); onAddToPlan(place, category); }}
+            aria-label="Add to plan"
+            title="Add to plan"
+          >
+            <CalendarPlus size={14} strokeWidth={2} aria-hidden />
+          </button>
+        )}
+        <button
+          type="button"
+          className={`picker-fav-toggle ${saved ? 'on' : ''}`}
+          onClick={(e) => { e.stopPropagation(); onToggleSave(); }}
+          aria-pressed={saved}
+          aria-label={saved ? 'Remove from wishlist' : 'Save to wishlist'}
+          title={saved ? 'Saved to wishlist (tap to remove)' : 'Save to wishlist'}
+        >
+          <Star size={14} strokeWidth={2} fill={saved ? 'currentColor' : 'none'} aria-hidden />
+        </button>
+      </div>
     </div>
   );
 }, (prev, next) =>
@@ -110,16 +124,29 @@ function PlacePickerModalImpl({
   onToggleSave,
   onClose,
   onPick,
+  onAddToPlan,
   title,
   footerSlot,
 }) {
   const [activePill, setActivePill] = useState(initialTab);
   const [query, setQuery] = useState('');
+  const pillRowRef = useRef(null);
 
   useEffect(() => {
     if (!fetchTabIfNeeded) return;
     if (liveDataByCategory[activePill] == null) fetchTabIfNeeded(activePill);
   }, [activePill, fetchTabIfNeeded, liveDataByCategory]);
+
+  // Scroll active pill into view. Strip is overflow-x:auto and starts at
+  // scrollLeft 0, so a 5-tab (Saved) strip clips a right-side initialTab
+  // (e.g. Hotels/Hidden gems) until scrolled. 4-tab (plan) strip fits and
+  // hid the bug.
+  useEffect(() => {
+    const row = pillRowRef.current;
+    if (!row) return;
+    const btn = row.querySelector(`[data-pill="${activePill}"]`);
+    if (btn) btn.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+  }, [activePill]);
 
   const data = liveDataByCategory[activePill];
   const loading = !!tabLoading?.[activePill] && (data == null || data.length === 0);
@@ -142,7 +169,7 @@ function PlacePickerModalImpl({
             <X size={14} strokeWidth={2} />
           </button>
         </div>
-        <div className="picker-pill-row" role="tablist" aria-label="Browse by category">
+        <div className="picker-pill-row" role="tablist" aria-label="Browse by category" ref={pillRowRef}>
           {tabs.map((t) => {
             const isActive = activePill === t.key;
             return (
@@ -150,6 +177,7 @@ function PlacePickerModalImpl({
                 key={t.key}
                 type="button"
                 role="tab"
+                data-pill={t.key}
                 aria-selected={isActive}
                 title={t.label}
                 className={`picker-pill ${isActive ? 'active' : ''}`}
@@ -191,6 +219,7 @@ function PlacePickerModalImpl({
                 saved={isSavedFn(p)}
                 onToggleSave={() => onToggleSave(p, activePill)}
                 onPick={() => onPick({ place: p, category: activePill })}
+                onAddToPlan={onAddToPlan}
                 showCategoryChip
               />
             ))
@@ -210,5 +239,6 @@ export const PlacePickerModal = memo(PlacePickerModalImpl, (p, n) =>
   p.tabLoading === n.tabLoading &&
   p.isSavedFn === n.isSavedFn &&
   p.title === n.title &&
-  p.footerSlot === n.footerSlot
+  p.footerSlot === n.footerSlot &&
+  p.onAddToPlan === n.onAddToPlan
 );
