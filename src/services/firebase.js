@@ -11,7 +11,11 @@ import {
   onAuthStateChanged,
   browserPopupRedirectResolver,
 } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from 'firebase/firestore';
 import { getFunctions as _getFunctions, httpsCallable } from 'firebase/functions';
 
 // Use the current origin as authDomain when on a Firebase-Hosting domain so
@@ -58,7 +62,14 @@ export function getAuth() {
 }
 
 export function getDb() {
-  if (!_db) _db = getFirestore(ensureApp());
+  if (!_db) {
+    // IndexedDB-backed offline cache: synced wishlists/plans stay readable
+    // offline and cold reads serve from cache. Multi-tab manager so several
+    // open tabs share one persistence lease without conflict.
+    _db = initializeFirestore(ensureApp(), {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    });
+  }
   return _db;
 }
 

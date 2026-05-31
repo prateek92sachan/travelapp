@@ -3,6 +3,7 @@
 
 import { GOOGLE_MAPS_KEY } from './config';
 import { loadCache, makeSaver, clearCache, makeRevGeoCache } from '../utils/persistentCache';
+import { fetchWithRetry } from '../utils/fetchRetry';
 
 /**
  * Geocode a destination string -> { lat, lng, formattedAddress, name, types, isCountry }.
@@ -20,7 +21,7 @@ export async function geocodeDestination(destination) {
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
-  const res = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+  const res = await fetchWithRetry(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
   if (!res.ok) throw new Error(`Geocoding failed: ${res.status}`);
   const data = await res.json();
 
@@ -209,7 +210,7 @@ async function placesTextSearch({ textQuery, lat, lng, radiusMeters, fetchCount,
         }
       };
     }
-    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    const res = await fetchWithRetry('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
       signal: controller.signal,
       headers: {
