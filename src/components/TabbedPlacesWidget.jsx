@@ -12,7 +12,7 @@ import {
   selectGhostCountry,
   resolveActiveForMode,
 } from '../stores/wishlistStore';
-import { useTabQuery, TAB_KEYS } from '../hooks/queries/useTabQuery';
+import { useTabQuery, TAB_KEYS, prefetchTab } from '../hooks/queries/useTabQuery';
 import { useViewportQuery } from '../hooks/queries/useViewportQuery';
 import { directionsUrl } from '../services/googleMaps';
 import { fetchWikiSummary, isWikiMatch } from '../services/wikipedia';
@@ -697,7 +697,8 @@ function WishlistListPicker({
   );
 }
 
-const NOOP_FETCH = () => {};
+// Lazy-load a category the picker requests but the drawer never opened.
+// (Was NOOP_FETCH, which left those picker tabs permanently empty.)
 
 // Live-POI picker for Saved mode. Mounted only while open so the 5 category
 // queries don't fire (and bill) when closed. Mirrors plan-mode add-session
@@ -822,7 +823,7 @@ function SavedPlacePicker({ listId, onClose, footerSlot }) {
         initialTab={initialTab}
         liveDataByCategory={liveDataByCategory}
         tabLoading={tabLoading}
-        fetchTabIfNeeded={NOOP_FETCH}
+        fetchTabIfNeeded={prefetchTab}
         isSavedFn={isSavedFn}
         onToggleSave={toggle}
         onPick={({ place, category }) => toggle(place, category)}

@@ -67,6 +67,25 @@ export function buildTabQueryFn({ tabKey, destination, lat, lng, radiusMeters })
   };
 }
 
+// Imperative on-demand fetch for a tab, using the current search context
+// (destination/coords/radius from searchStore). Populates the SAME query-cache
+// key that useTabQuery observes, so a disabled (un-demanded) tab query renders
+// the result as soon as it lands. Used by the plan/save picker, whose category
+// pills can request a tab the drawer never opened. No-op without valid coords.
+export function prefetchTab(tabKey) {
+  if (!TAB_KEYS.includes(tabKey)) return Promise.resolve();
+  const { destination, coords, searchRadiusMeters } = useSearchStore.getState();
+  const lat = coords?.lat;
+  const lng = coords?.lng;
+  if (!destination || !Number.isFinite(lat) || !Number.isFinite(lng)) return Promise.resolve();
+  const queryKey = tabQueryKey({ tabKey, destination, lat, lng, radiusMeters: searchRadiusMeters });
+  return queryClient.fetchQuery({
+    queryKey,
+    queryFn: buildTabQueryFn({ tabKey, destination, lat, lng, radiusMeters: searchRadiusMeters }),
+    staleTime: Infinity
+  });
+}
+
 // Tab query gating (Fix 3): fetches only when the tab is "demanded" by either
 // (a) the active drawer tab, (b) the map category toggle being ON, or
 // (c) cache already has data (we still want refetch/refresh behavior).

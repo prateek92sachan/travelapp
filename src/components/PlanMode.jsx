@@ -12,7 +12,7 @@ import {
 import { useSearchStore } from '../stores/searchStore';
 import { useMapStore } from '../stores/mapStore';
 import { useWishlistStore, selectLists } from '../stores/wishlistStore';
-import { useTabQuery } from '../hooks/queries/useTabQuery';
+import { useTabQuery, prefetchTab } from '../hooks/queries/useTabQuery';
 import { useViewportQuery } from '../hooks/queries/useViewportQuery';
 import {
   PHASES,
@@ -123,7 +123,7 @@ export default function PlanMode({ list }) {
     if (!savedListIdForCity) return false;
     return useWishlistStore.getState().isWishlisted(savedListIdForCity, placeId);
   };
-  const fetchTabIfNeeded = () => {}; // queries auto-fetch; noop for compat
+  const fetchTabIfNeeded = prefetchTab; // lazy-load a picker tab the drawer never opened
   const plan = useMemo(() => ensurePlan(list?.plan), [list?.plan]);
 
   const items = list?.items || [];
