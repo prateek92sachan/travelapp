@@ -30,7 +30,7 @@ import {
 } from '../utils/plan';
 import { formatCount } from '../utils/format';
 import { fetchWikiSummary, isWikiMatch } from '../services/wikipedia';
-import { PlacePickerModal, SESSION_TABS } from './PlacePickerModal';
+import { PlacePickerModal, PICKER_TABS, SESSION_TABS } from './PlacePickerModal';
 
 const PHASE_ICON = { morning: Sun, evening: Sunset, night: Moon };
 const PHASE_COLOR = { morning: '#f59e0b', evening: '#f97316', night: '#6366f1' };
