@@ -421,6 +421,11 @@ function TabbedPlacesWidget({ expandable = true }) {
                   activeListName={saveListName}
                   onSave={() => addPlaceToSmartWishlist(a, activeTab)}
                   onRemove={() => removePlaceFromWishlist(a, effectiveListId)}
+                  onAddToPlan={() =>
+                    viewportCity
+                      ? setDetailPlanFor(a)
+                      : toast.error('Search a city to add to a plan')
+                  }
                 />
               ))}
             </div>
@@ -1045,7 +1050,8 @@ const PlaceRow = memo(function PlaceRow({
   saved,
   activeListName,
   onSave,
-  onRemove
+  onRemove,
+  onAddToPlan,
 }) {
   const description = a.wiki?.extract || a.summary;
   const truncated =
@@ -1062,6 +1068,11 @@ const PlaceRow = memo(function PlaceRow({
     e.stopPropagation();
     if (saved) onRemove();
     else onSave();
+  };
+
+  const addToPlan = (e) => {
+    e.stopPropagation();
+    onAddToPlan?.();
   };
 
   return (
@@ -1105,15 +1116,28 @@ const PlaceRow = memo(function PlaceRow({
               )}
             </span>
           )}
-          <button
-            type="button"
-            className={`activity-save-star ${saved ? 'saved' : ''}`}
-            onClick={toggleWishlist}
-            aria-label={`${saved ? 'Remove' : 'Save'} ${a.name} ${saved ? 'from' : 'to'} wishlist`}
-            title={`${saved ? 'Remove from' : 'Save to'} ${activeListName || 'wishlist'}`}
-          >
-            <Star size={16} strokeWidth={2} aria-hidden />
-          </button>
+          <div className="activity-actions">
+            {onAddToPlan && (
+              <button
+                type="button"
+                className="activity-plan-btn"
+                onClick={addToPlan}
+                aria-label={`Add ${a.name} to plan`}
+                title="Add to plan"
+              >
+                <CalendarPlus size={16} strokeWidth={2} aria-hidden />
+              </button>
+            )}
+            <button
+              type="button"
+              className={`activity-save-star ${saved ? 'saved' : ''}`}
+              onClick={toggleWishlist}
+              aria-label={`${saved ? 'Remove' : 'Save'} ${a.name} ${saved ? 'from' : 'to'} wishlist`}
+              title={`${saved ? 'Remove from' : 'Save to'} ${activeListName || 'wishlist'}`}
+            >
+              <Star size={16} strokeWidth={2} aria-hidden />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1125,7 +1149,8 @@ const PlaceRow = memo(function PlaceRow({
   prev.index === next.index &&
   prev.selected === next.selected &&
   prev.saved === next.saved &&
-  prev.activeListName === next.activeListName
+  prev.activeListName === next.activeListName &&
+  !!prev.onAddToPlan === !!next.onAddToPlan
 );
 
 const PlaceDetail = memo(function PlaceDetail({

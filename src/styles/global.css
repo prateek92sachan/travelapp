@@ -2399,8 +2399,14 @@ input { font-family: inherit; }
   padding: 2px 8px;
   border-radius: 999px;
 }
-.activity-save-star {
+.activity-actions {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.activity-save-star,
+.activity-plan-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2414,7 +2420,8 @@ input { font-family: inherit; }
   cursor: pointer;
   transition: background var(--transition), border-color var(--transition), color var(--transition);
 }
-.activity-save-star:hover {
+.activity-save-star:hover,
+.activity-plan-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
