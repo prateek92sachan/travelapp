@@ -1276,7 +1276,8 @@ const PlaceDetail = memo(function PlaceDetail({
 }, (prev, next) =>
   prev.place === next.place &&
   prev.saved === next.saved &&
-  prev.activeListName === next.activeListName
+  prev.activeListName === next.activeListName &&
+  !!prev.onAddToPlan === !!next.onAddToPlan
 );
 
 function first30Words(text) {
