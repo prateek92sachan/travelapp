@@ -187,55 +187,6 @@ export async function reverseGeocodePlaceName({ lat, lng }) {
   }
 }
 
-/**
- * Find the most prominent nearby city for display purposes.
- *
- * Uses Places Text Search with a "city" query biased to the given coords.
- * Google ranks by prominence so for a town like "Hulu Langat" near KL
- * this returns Kuala Lumpur (the famous metro it belongs to), not just
- * the destination itself. Returns null on failure.
- *
- * `excludeName` lets the caller skip results that match the destination
- * (case-insensitive), so a search for "Tokyo" doesn't return "Tokyo" as
- * the parent city.
- */
-export async function fetchProminentNearbyCity({ lat, lng, excludeName = '' } = {}) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
-    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': GOOGLE_MAPS_KEY,
-        'X-Goog-FieldMask': 'places.displayName'
-      },
-      body: JSON.stringify({
-        textQuery: 'city',
-        locationBias: {
-          circle: { center: { latitude: lat, longitude: lng }, radius: 50000 }
-        },
-        maxResultCount: 5
-      })
-    }).finally(() => clearTimeout(timer));
-    if (!res.ok) return null;
-    const data = await res.json();
-    const places = data.places || [];
-    const exclude = excludeName.trim().toLowerCase();
-    for (const p of places) {
-      const name = p.displayName?.text;
-      if (!name) continue;
-      if (exclude && name.toLowerCase() === exclude) continue;
-      return name;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 // ---- Places (New) Text Search ---------------------------------------------
 
 const PLACES_FIELD_MASK = [
@@ -486,19 +437,6 @@ async function fetchAndRank({
       .map(shapePlace);
   }
   return filtered;
-}
-
-// ---- Public: fetch top POIs (used by Map widget for markers) --------------
-
-export async function fetchTopPOIs({ destination, lat, lng, radiusMeters = 20000, limit = 10 }) {
-  return fetchAndRank({
-    textQuery: `top tourist attractions in ${destination}`,
-    lat,
-    lng,
-    radiusMeters,
-    limit,
-    filterOpts: { minRating: 4.0, minReviews: 50 }
-  });
 }
 
 // ---- Public: tab-specific fetchers ----------------------------------------
@@ -766,26 +704,6 @@ export async function fetchPlacesInViewport({
 
   inFlight.set(key, promise);
   return promise;
-}
-
-/**
- * Convenience: fetch top places within `radiusKm` of a single point.
- * Used by hotel-click "show me what's near here" mode.
- */
-export async function fetchPlacesNearPoint({
-  lat,
-  lng,
-  radiusKm = 2,
-  category = 'activities',
-  limit = 10
-}) {
-  return fetchPlacesInViewport({
-    lat,
-    lng,
-    radiusMeters: Math.round(radiusKm * 1000),
-    category,
-    limit
-  });
 }
 
 /** Manually clear the viewport cache (e.g. on new search). */

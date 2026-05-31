@@ -86,10 +86,6 @@ export function useMapData() {
     [searchHere]
   );
 
-  // Back-compat alias: existing callers of handleSearchHereClick still get the
-  // city-wide behavior. New box-search flow uses boxSearchHere/cityWideSearch.
-  const handleSearchHereClick = cityWideSearch;
-
   const actionsDisabled = loading;
 
   // Source priority: viewport (all cats) > city-wide tabData.
@@ -116,7 +112,6 @@ export function useMapData() {
     tabData,
     markersForCat,
     onPinTap,
-    handleSearchHereClick,
     cityWideSearch,
     boxSearchHere,
     clearViewportItems,

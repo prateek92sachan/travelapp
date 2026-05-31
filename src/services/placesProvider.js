@@ -38,7 +38,6 @@ export const fetchTopNatureUnique = (args) => svc().fetchTopNatureUnique(args);
 export const fetchHiddenGems = (args) => svc().fetchHiddenGems(args);
 export const fetchTopHotels = (args) => svc().fetchTopHotels(args);
 export const fetchPlacesInViewport = (args) => svc().fetchPlacesInViewport(args);
-export const fetchPlacesNearPoint = (args) => svc().fetchPlacesNearPoint(args);
 
 // Destination geocode. Tmap stays pure Mapbox (no Google fallback); other
 // providers use the existing Mapbox-first / Google-fallback dispatcher.

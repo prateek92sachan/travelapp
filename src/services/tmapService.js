@@ -164,7 +164,7 @@ export function fetchTopHotels({ lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchCategory({ category: 'hotels', lat, lng, radiusMeters, limit });
 }
 
-// ---- Public: viewport + nearby (cached, deduped — mirrors googleMaps.js) ----
+// ---- Public: viewport (cached, deduped — mirrors googleMaps.js) -------------
 
 function viewportCacheKey({ lat, lng, radiusMeters, category, bounds, limit }) {
   const lim = Number.isFinite(limit) ? limit : 10;
@@ -207,16 +207,6 @@ export function fetchPlacesInViewport({
 
   inFlight.set(key, promise);
   return promise;
-}
-
-export function fetchPlacesNearPoint({ lat, lng, radiusKm = 2, category = 'activities', limit = 10 }) {
-  return fetchPlacesInViewport({
-    lat,
-    lng,
-    radiusMeters: Math.round(radiusKm * 1000),
-    category,
-    limit
-  });
 }
 
 export function clearViewportCache() {
