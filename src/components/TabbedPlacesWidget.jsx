@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Compass, Utensils, Leaf, Gem, BedDouble, Navigation, Pencil, Trash2, Star, Sparkles, RotateCw } from 'lucide-react';
+import { Compass, Utensils, Leaf, Gem, BedDouble, Navigation, Pencil, Trash2, Star, Sparkles, RotateCw, CalendarPlus } from 'lucide-react';
 import Card from './Card';
 import { useSearchStore } from '../stores/searchStore';
 import { useMapStore } from '../stores/mapStore';
@@ -9,6 +9,7 @@ import {
   selectLists,
   selectActiveListId,
   selectGhostCity,
+  selectGhostCountry,
   resolveActiveForMode,
 } from '../stores/wishlistStore';
 import { useTabQuery, TAB_KEYS } from '../hooks/queries/useTabQuery';
@@ -19,9 +20,11 @@ import { usePlaceSummary } from '../hooks/usePlaceSummary';
 import { SavedPlaceCard } from './WishlistPanel';
 import PlanMode from './PlanMode';
 import { PlacePickerModal, PICKER_TABS } from './PlacePickerModal';
+import PlanSlotChooser from './PlanSlotChooser';
+import { toast } from 'sonner';
 import { formatCount, formatPrice } from '../utils/format';
 import { shortenAddress } from '../utils/shortenAddress';
-import { countPlannedPlaces } from '../utils/plan';
+import { countPlannedPlaces, ensurePlan, PHASE_LABEL } from '../utils/plan';
 
 const shortListName = shortenAddress;
 
@@ -31,6 +34,20 @@ const shortListName = shortenAddress;
 // align on the city token.
 function cityKey(s) {
   return (s || '').split(',')[0].trim().toLowerCase();
+}
+
+// City chip label = city (first address segment) on row 1, country on row 2.
+// Country comes from the stored `list.country`; falls back to the trailing
+// segment of a formatted-address destination for lists created before we
+// tracked it. Keeps the chip compact instead of one long address line.
+function cityCountryLabel(name, destination, country) {
+  const city = shortListName(((name || destination || '').split(',')[0] || '').trim());
+  let land = country || '';
+  if (!land) {
+    const parts = (destination || '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (parts.length >= 2) land = parts[parts.length - 1];
+  }
+  return { city, country: land };
 }
 
 const TabNav = memo(function TabNav({ activeTab, tabs, onSwitch }) {
@@ -89,11 +106,13 @@ function TabbedPlacesWidget({ expandable = true }) {
   // Map domain (mode overrides drive activeTabItems priority)
   const viewportTarget = useMapStore((s) => s.viewportTarget);
   const viewportCity = useMapStore((s) => s.viewportCity);
+  const viewportCountry = useMapStore((s) => s.viewportCountry);
 
   // Wishlist domain
   const wishlistLists = useWishlistStore(selectLists);
   const activeWishlistId = useWishlistStore(selectActiveListId);
   const ghostCity = useWishlistStore(selectGhostCity);
+  const ghostCountry = useWishlistStore(selectGhostCountry);
   const wAddPlace = useWishlistStore((s) => s.addPlace);
   const wAddPlaceSmart = useWishlistStore((s) => s.addPlaceSmart);
   const wRemovePlace = useWishlistStore((s) => s.removePlace);
@@ -153,7 +172,7 @@ function TabbedPlacesWidget({ expandable = true }) {
     onSelect: (id) => {
       wSelectList(id);
       const list = (wishlistLists || []).find((l) => l.id === id);
-      if (list?.destination) wSetGhostCity(list.destination);
+      if (list?.destination) wSetGhostCity(list.destination, list.country || null);
     },
   });
 
@@ -185,7 +204,7 @@ function TabbedPlacesWidget({ expandable = true }) {
   const addPlaceToWishlist = (place, category, listId = effectiveActiveId) =>
     wAddPlace({ listId, place, category });
   const addPlaceToSmartWishlist = (place, category) =>
-    wAddPlaceSmart({ place, category, viewportCity, fallbackListId: effectiveActiveId });
+    wAddPlaceSmart({ place, category, viewportCity, viewportCountry, fallbackListId: effectiveActiveId });
   const removePlaceFromWishlist = (placeId, listId = effectiveActiveId) =>
     wRemovePlace({ listId, placeId });
   const selectWishlistById = (listId) => wSelectList(listId);
@@ -215,6 +234,47 @@ function TabbedPlacesWidget({ expandable = true }) {
   // switches before activeTabItems updates, or when data hasn't loaded yet.
   const selected = detailPlace;
   const savedCount = activeWishlist?.items?.length || 0;
+
+  const wAddToPlanSlot = useWishlistStore((s) => s.addToPlanSlot);
+  const [detailPlanFor, setDetailPlanFor] = useState(null); // place | null
+  const detailPlanList = useMemo(
+    () =>
+      viewportCity
+        ? wishlistLists.find(
+            (l) => l.mode === 'plan' && l.destination?.toLowerCase() === viewportCity.toLowerCase()
+          )
+        : null,
+    [wishlistLists, viewportCity]
+  );
+  const { detailPlanDayCount, detailHotelFullDays } = useMemo(() => {
+    const p = ensurePlan(detailPlanList?.plan);
+    const full = new Set();
+    p.itinerary.forEach((d, i) => { if ((d.hotels?.length || 0) >= 2) full.add(i); });
+    return { detailPlanDayCount: p.days, detailHotelFullDays: full };
+  }, [detailPlanList]);
+
+  const commitDetailPlan = ({ dayIndex, phase, newDay }) => {
+    if (!detailPlanFor || !viewportCity) { setDetailPlanFor(null); return; }
+    const res = wAddToPlanSlot({
+      destination: viewportCity,
+      country: viewportCountry,
+      place: detailPlanFor,
+      category: activeTab,
+      dayIndex,
+      phase,
+      asHotel: activeTab === 'hotels',
+      newDay,
+    });
+    if (res?.blocked === 'hotelFull') {
+      toast.error(`Day ${res.dayIndex + 1} already has 2 hotels`);
+      return;
+    }
+    if (res) {
+      const label = `Day ${res.dayIndex + 1}`;
+      toast.success(res.asHotel ? `Hotel set · ${label}` : `Added to ${label} · ${PHASE_LABEL[res.phase]}`);
+    }
+    setDetailPlanFor(null);
+  };
 
   // Refs so the re-anchor effect can read current values without them being deps.
   const selectedPlaceIdRef = useRef(selectedPlaceId);
@@ -264,6 +324,7 @@ function TabbedPlacesWidget({ expandable = true }) {
                 activeListId={activeWishlist?.id || null}
                 mode={wishlistState.mode}
                 ghostCity={showGhost ? ghostCity : null}
+                ghostCountry={showGhost ? ghostCountry : null}
                 onGhostClick={onPromoteGhost}
                 editingName={wishlistState.editingName}
                 editValue={wishlistState.editValue}
@@ -373,6 +434,18 @@ function TabbedPlacesWidget({ expandable = true }) {
           activeListName={saveListName}
           onSave={() => addPlaceToSmartWishlist(selected, activeTab)}
           onRemove={() => removePlaceFromWishlist(selected, effectiveListId)}
+          onAddToPlan={viewportCity ? () => setDetailPlanFor(selected) : undefined}
+        />
+      )}
+
+      {detailPlanFor && (
+        <PlanSlotChooser
+          placeName={detailPlanFor.name}
+          dayCount={detailPlanDayCount}
+          isHotel={activeTab === 'hotels'}
+          hotelFullDays={detailHotelFullDays}
+          onCommit={commitDetailPlan}
+          onClose={() => setDetailPlanFor(null)}
         />
       )}
     </>
@@ -495,6 +568,7 @@ function WishlistListPicker({
   activeListId,
   mode,
   ghostCity,
+  ghostCountry,
   onGhostClick,
   editingName,
   editValue,
@@ -513,6 +587,7 @@ function WishlistListPicker({
     <div className="wishlist-list-picker" role="tablist" aria-label="Wishlist lists">
       {lists.map((list) => {
         const isActive = activeListId === list.id;
+        const { city, country } = cityCountryLabel(list.name, list.destination, list.country);
         return (
           <div
             key={list.id}
@@ -548,7 +623,10 @@ function WishlistListPicker({
               />
             ) : (
               <>
-                <span>{shortListName(list.name)}</span>
+                <span className="wishlist-list-chip-label">
+                  <span className="wishlist-list-chip-city">{city}</span>
+                  {country && <span className="wishlist-list-chip-country">{country}</span>}
+                </span>
                 <span>
                   {mode === 'plan'
                     ? countPlannedPlaces(list.plan)
@@ -596,7 +674,15 @@ function WishlistListPicker({
           }}
           title={`Add ${ghostCity} to ${mode === 'plan' ? 'Plan' : 'Saved'}`}
         >
-          <span>{shortListName(ghostCity)}</span>
+          {(() => {
+            const { city, country } = cityCountryLabel(ghostCity, ghostCity, ghostCountry);
+            return (
+              <span className="wishlist-list-chip-label">
+                <span className="wishlist-list-chip-city">{city}</span>
+                {country && <span className="wishlist-list-chip-country">{country}</span>}
+              </span>
+            );
+          })()}
           <span className="wishlist-list-chip-ghost-hint">+</span>
         </div>
       )}
@@ -618,6 +704,25 @@ function SavedPlacePicker({ listId, onClose, footerSlot }) {
   const items = useWishlistStore(
     (s) => s.wishlist.lists.find((l) => l.id === listId)?.items
   );
+
+  const savedList = useWishlistStore((s) => s.wishlist.lists.find((l) => l.id === listId));
+  const savedDest = savedList?.destination || null;
+  const savedCountry = savedList?.country || null;
+  const wAddToPlanSlot = useWishlistStore((s) => s.addToPlanSlot);
+  const planList = useWishlistStore((s) =>
+    savedDest
+      ? s.wishlist.lists.find(
+          (l) => l.mode === 'plan' && l.destination?.toLowerCase() === savedDest.toLowerCase()
+        )
+      : null
+  );
+  const { planDayCount, hotelFullDays } = useMemo(() => {
+    const p = ensurePlan(planList?.plan);
+    const full = new Set();
+    p.itinerary.forEach((d, i) => { if ((d.hotels?.length || 0) >= 2) full.add(i); });
+    return { planDayCount: p.days, hotelFullDays: full };
+  }, [planList]);
+  const [planFor, setPlanFor] = useState(null); // { place, category } | null
 
   const activitiesQ = useTabQuery('activities');
   const restaurantsQ = useTabQuery('restaurants');
@@ -677,21 +782,57 @@ function SavedPlacePicker({ listId, onClose, footerSlot }) {
     else wAddPlace({ listId, place, category });
   };
 
+  const commitPlan = ({ dayIndex, phase, newDay }) => {
+    if (!planFor || !savedDest) { setPlanFor(null); return; }
+    const res = wAddToPlanSlot({
+      destination: savedDest,
+      country: savedCountry,
+      place: planFor.place,
+      category: planFor.category,
+      dayIndex,
+      phase,
+      asHotel: planFor.category === 'hotels',
+      newDay,
+    });
+    if (res?.blocked === 'hotelFull') {
+      toast.error(`Day ${res.dayIndex + 1} already has 2 hotels`);
+      return; // keep sheet open so user can pick another day
+    }
+    if (res) {
+      const label = `Day ${res.dayIndex + 1}`;
+      toast.success(res.asHotel ? `Hotel set · ${label}` : `Added to ${label} · ${PHASE_LABEL[res.phase]}`);
+    }
+    setPlanFor(null);
+  };
+
   return createPortal(
-    <PlacePickerModal
-      plannedSet={plannedSet}
-      tabs={PICKER_TABS}
-      initialTab={initialTab}
-      liveDataByCategory={liveDataByCategory}
-      tabLoading={tabLoading}
-      fetchTabIfNeeded={NOOP_FETCH}
-      isSavedFn={isSavedFn}
-      onToggleSave={toggle}
-      onPick={({ place, category }) => toggle(place, category)}
-      onClose={onClose}
-      title="Add to saved"
-      footerSlot={footerSlot}
-    />,
+    <>
+      <PlacePickerModal
+        plannedSet={plannedSet}
+        tabs={PICKER_TABS}
+        initialTab={initialTab}
+        liveDataByCategory={liveDataByCategory}
+        tabLoading={tabLoading}
+        fetchTabIfNeeded={NOOP_FETCH}
+        isSavedFn={isSavedFn}
+        onToggleSave={toggle}
+        onPick={({ place, category }) => toggle(place, category)}
+        onAddToPlan={(place, category) => setPlanFor({ place, category })}
+        onClose={onClose}
+        title="Add to saved"
+        footerSlot={footerSlot}
+      />
+      {planFor && (
+        <PlanSlotChooser
+          placeName={planFor.place.name}
+          dayCount={planDayCount}
+          isHotel={planFor.category === 'hotels'}
+          hotelFullDays={hotelFullDays}
+          onCommit={commitPlan}
+          onClose={() => setPlanFor(null)}
+        />
+      )}
+    </>,
     document.body
   );
 }
@@ -719,11 +860,13 @@ function WishlistBody({
   const addPlaceToWishlist = (place, category, listId = activeWishlistId) =>
     wAddPlace({ listId, place, category });
 
-  // Plan mode: skip the "+ Add city to Plan" empty state. When the current
-  // destination has no plan list yet, auto-create it and drop the user into
-  // Day 1 immediately. Saved mode keeps the manual prompt (per current ask).
+  // Both modes: skip the "+ Add city" empty state. When the current
+  // destination has no list yet in this mode, auto-create it and drop the
+  // user straight in (Plan → Day 1, Saved → active list). The promoted list
+  // renders among the real chips, so the active highlight sits up front
+  // instead of on the trailing ghost chip.
   useEffect(() => {
-    if (mode === 'plan' && !activeList && ghostCity) {
+    if (!activeList && ghostCity) {
       onPromoteGhost();
     }
   }, [mode, activeList, ghostCity, onPromoteGhost]);
@@ -987,7 +1130,8 @@ const PlaceDetail = memo(function PlaceDetail({
   saved,
   activeListName,
   onSave,
-  onRemove
+  onRemove,
+  onAddToPlan,
 }) {
   const destination = useSearchStore((s) => s.destination);
   const isManual = place.placeId?.startsWith('manual-');
@@ -1111,6 +1255,12 @@ const PlaceDetail = memo(function PlaceDetail({
           <Star size={14} strokeWidth={2} fill={saved ? 'currentColor' : 'none'} aria-hidden />
           {saved ? 'Saved' : 'Save'}
         </button>
+        {onAddToPlan && (
+          <button type="button" className="btn btn-outline detail-plan-btn" onClick={onAddToPlan}>
+            <CalendarPlus size={14} strokeWidth={2} aria-hidden />
+            Add to plan
+          </button>
+        )}
         <a className="btn btn-outline detail-dir-btn" href={directionsUrl(place)} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
           <Navigation size={14} strokeWidth={2} aria-hidden />
           Directions
