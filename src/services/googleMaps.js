@@ -4,6 +4,8 @@
 import { GOOGLE_MAPS_KEY } from './config';
 import { loadCache, makeSaver, clearCache, makeRevGeoCache } from '../utils/persistentCache';
 import { fetchWithRetry } from '../utils/fetchRetry';
+import { rectFromCenterRadius, distanceMeters } from './geo';
+import { NOISE_TYPES, popularityScore, isWorthShowing, shapePlace } from './placeRanking';
 
 /**
  * Geocode a destination string -> { lat, lng, formattedAddress, name, types, isCountry }.
@@ -231,39 +233,6 @@ async function placesTextSearch({ textQuery, lat, lng, radiusMeters, fetchCount,
   }
 }
 
-// ---- Geo helpers ----------------------------------------------------------
-
-const EARTH_M_PER_DEG = 111320; // metres per degree latitude (≈ at equator)
-
-// Build a lat/lng rectangle circumscribing the circle of `radiusMeters`
-// around (lat,lng). Used as a hard locationRestriction so text-search can't
-// return strong name-matches far outside the searched area. Corners sit at
-// ~1.41× radius; the haversine post-filter then trims them to the true circle.
-function rectFromCenterRadius(lat, lng, radiusMeters) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !(radiusMeters > 0)) {
-    return null;
-  }
-  const latDelta = radiusMeters / EARTH_M_PER_DEG;
-  const cos = Math.cos((lat * Math.PI) / 180);
-  const lngDelta = radiusMeters / (EARTH_M_PER_DEG * Math.max(0.01, Math.abs(cos)));
-  return {
-    low:  { lat: lat - latDelta, lng: lng - lngDelta },
-    high: { lat: lat + latDelta, lng: lng + lngDelta }
-  };
-}
-
-// Haversine distance in metres between two lat/lng points.
-function distanceMeters(lat1, lng1, lat2, lng2) {
-  const R = 6371000;
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
-
 // ---- Ranking helpers ------------------------------------------------------
 
 // Categories that indicate a "real attraction" — used to filter out noise
@@ -292,65 +261,6 @@ const ATTRACTION_TYPES = new Set([
   'hiking_area',
   'scenic_spot'
 ]);
-
-const NOISE_TYPES = new Set([
-  'lodging',
-  'real_estate_agency',
-  'gas_station',
-  'atm',
-  'bank',
-  'pharmacy',
-  'convenience_store',
-  'parking',
-  'storage'
-]);
-
-/**
- * Score = rating × log10(reviewCount + 1).
- * This balances quality (a 4.9 rating is meaningful) with popularity
- * (a place with 50,000 reviews is more "real" than one with 12), without
- * letting either dominate.
- */
-function popularityScore(p) {
-  const rating = p.rating ?? 0;
-  const count = p.userRatingCount ?? 0;
-  return rating * Math.log10(count + 1);
-}
-
-/**
- * Returns true if the place looks like a legitimate attraction worth
- * surfacing. Filters out noise, low-rated, and under-reviewed entries.
- */
-function isWorthShowing(p, { minRating = 4.0, minReviews = 50 } = {}) {
-  const types = p.types || [];
-  if (types.some((t) => NOISE_TYPES.has(t))) return false;
-  if ((p.rating ?? 0) < minRating) return false;
-  if ((p.userRatingCount ?? 0) < minReviews) return false;
-  return true;
-}
-
-/**
- * Map a raw Places API response to our app's POI / activity shape.
- */
-function shapePlace(p) {
-  const types = p.types || [];
-  return {
-    placeId: p.id,
-    name: p.displayName?.text || 'Unnamed place',
-    address: p.formattedAddress,
-    lat: p.location?.latitude,
-    lng: p.location?.longitude,
-    rating: p.rating,
-    reviewCount: p.userRatingCount ?? 0,
-    types,
-    summary: deriveSummaryFromTypes(types, p.displayName?.text || ''),
-    estCost: estimateCost(types),
-    estDuration: estimateDuration(types),
-    photoUrl: p.photos?.[0]?.name
-      ? `https://places.googleapis.com/v1/${p.photos[0].name}/media?maxHeightPx=400&maxWidthPx=600&key=${GOOGLE_MAPS_KEY}`
-      : null
-  };
-}
 
 // ---- Public: generic helper used by category fetchers ---------------------
 
@@ -497,39 +407,6 @@ export async function fetchHiddenGems({ destination, lat, lng, radiusMeters = 20
       return rating >= 4.5 && reviews >= 100 && reviews <= 2000;
     }
   });
-}
-
-// ---- Heuristics for activity metadata -------------------------------------
-
-function estimateCost(types = []) {
-  const t = new Set(types);
-  if (t.has('park') || t.has('natural_feature') || t.has('hiking_area') || t.has('beach'))
-    return 'Free';
-  if (t.has('museum') || t.has('art_gallery') || t.has('zoo') || t.has('aquarium'))
-    return '₹₹';
-  if (t.has('amusement_park') || t.has('observation_deck')) return '₹₹₹';
-  if (t.has('restaurant') || t.has('cafe') || t.has('bar')) return '₹₹';
-  return '₹₹';
-}
-
-function estimateDuration(types = []) {
-  const t = new Set(types);
-  if (t.has('amusement_park') || t.has('zoo') || t.has('aquarium'))
-    return 'Half day';
-  if (t.has('museum') || t.has('art_gallery')) return '2-3 hrs';
-  if (t.has('park') || t.has('hiking_area') || t.has('beach')) return '1-3 hrs';
-  if (t.has('restaurant') || t.has('cafe') || t.has('bar')) return '1-2 hrs';
-  return '2 hrs';
-}
-
-function deriveSummaryFromTypes(types, name) {
-  if (!types?.length) return `Visit ${name}.`;
-  const friendly = types
-    .filter((t) => !['point_of_interest', 'establishment'].includes(t))
-    .slice(0, 3)
-    .map((t) => t.replace(/_/g, ' '))
-    .join(' / ');
-  return friendly ? `${friendly}` : `Visit ${name}.`;
 }
 
 /**
