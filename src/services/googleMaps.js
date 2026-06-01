@@ -262,6 +262,23 @@ const ATTRACTION_TYPES = new Set([
   'scenic_spot'
 ]);
 
+// ---- Tab-search disk cache ------------------------------------------------
+//
+// Tab results (Activities/Restaurants/Nature/Gems/Hotels) were cached only
+// in TanStack's in-memory store, so every reload / PWA relaunch re-billed each
+// tab's Enterprise Text Search. Disk-back them like the viewport cache so a
+// fresh tab reuses a recent session's result. Key quantizes the city-center
+// coords (~1.1km bucket) + radius + limit, so micro-jitter and repeat searches
+// of the same place collapse onto one entry. Each hit = one billed search avoided.
+const TAB_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const TAB_CACHE = loadCache('tabsearch', TAB_TTL_MS);
+const persistTabs = makeSaver('tabsearch', { max: 200, getTime: (v) => v.time });
+
+function tabSearchKey({ textQuery, lat, lng, radiusMeters, limit }) {
+  const q = (n) => (Number.isFinite(n) ? quantize(n).toFixed(2) : 'na');
+  return `${textQuery}|${q(lat)}|${q(lng)}|${radiusMeters}|${limit}`;
+}
+
 // ---- Public: generic helper used by category fetchers ---------------------
 
 /**
@@ -278,6 +295,12 @@ async function fetchAndRank({
   filterOpts,
   customFilter
 }) {
+  const cacheKey = tabSearchKey({ textQuery, lat, lng, radiusMeters, limit });
+  const cached = TAB_CACHE.get(cacheKey);
+  if (cached && Date.now() - cached.time < TAB_TTL_MS) {
+    return cached.data;
+  }
+
   const rawAll = await placesTextSearch({
     textQuery,
     lat,
@@ -312,13 +335,17 @@ async function fetchAndRank({
     .map(shapePlace);
 
   // Fallback: if filters eliminated everything, drop them and just rank
-  if (filtered.length === 0) {
-    return raw
-      .sort((a, b) => popularityScore(b) - popularityScore(a))
-      .slice(0, limit)
-      .map(shapePlace);
-  }
-  return filtered;
+  const result =
+    filtered.length === 0
+      ? raw
+          .sort((a, b) => popularityScore(b) - popularityScore(a))
+          .slice(0, limit)
+          .map(shapePlace)
+      : filtered;
+
+  TAB_CACHE.set(cacheKey, { data: result, time: Date.now() });
+  persistTabs(TAB_CACHE);
+  return result;
 }
 
 // ---- Public: tab-specific fetchers ----------------------------------------
