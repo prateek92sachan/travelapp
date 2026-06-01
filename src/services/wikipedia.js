@@ -18,7 +18,7 @@ const WIKI_SEARCH =
 // Persisted for a day. Beyond saving free Wikipedia calls, this keeps the
 // place→thumbnail mapping warm so enrichWithWiki keeps swapping in free Wiki
 // images on reload instead of falling back to billed Google photos.
-const WIKI_TTL_MS = 24 * 60 * 60 * 1000;
+const WIKI_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const WIKI_CACHE = loadCache('wiki', WIKI_TTL_MS);
 const persistWiki = makeSaver('wiki', { max: 500 });
 

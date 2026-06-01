@@ -29,8 +29,8 @@ const CATEGORY_CANONICAL = {
   hotels: 'hotel'
 };
 
-// ---- Viewport cache (mirrors googleMaps.js: bbox/category key, 7-day TTL) ---
-const VIEWPORT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// ---- Viewport cache (mirrors googleMaps.js: bbox/category key, 30-day TTL) ---
+const VIEWPORT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const VIEWPORT_CACHE = loadCache('tmap-viewport', VIEWPORT_TTL_MS);
 const persistViewport = makeSaver('tmap-viewport', { max: 100, getTime: (v) => v.time });
 const inFlight = new Map();

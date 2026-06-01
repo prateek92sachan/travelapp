@@ -69,7 +69,7 @@ export async function geocodeDestination(destination) {
 // Hydrated from localStorage so reverse-geocode labels survive a reload.
 // Namespace -en: reverse-geocode requests language=en; old localized entries
 // are ignored rather than served stale. Shared machinery: makeRevGeoCache.
-const { get: revGeoGet, set: revGeoSet } = makeRevGeoCache('revgeo-en');
+const { get: revGeoGet, set: revGeoSet } = makeRevGeoCache('revgeo-en', { ttlMs: 30 * 24 * 60 * 60 * 1000 });
 
 // Old cache entries stored a bare city string; new ones store
 // { name, country }. Normalize so consumers always get the object shape.
@@ -270,7 +270,7 @@ const ATTRACTION_TYPES = new Set([
 // fresh tab reuses a recent session's result. Key quantizes the city-center
 // coords (~1.1km bucket) + radius + limit, so micro-jitter and repeat searches
 // of the same place collapse onto one entry. Each hit = one billed search avoided.
-const TAB_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const TAB_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const TAB_CACHE = loadCache('tabsearch', TAB_TTL_MS);
 const persistTabs = makeSaver('tabsearch', { max: 200, getTime: (v) => v.time });
 
@@ -454,11 +454,11 @@ export function directionsUrl({ lat, lng, name }) {
 // tiny pan deltas all hit the same bucket. TTL 10 min — long enough that
 // re-pans feel snappy, short enough that "data freshness" stays believable.
 
-// 7 days: panned-area place lists barely change (name/coords/rating are slow),
+// 30 days: panned-area place lists barely change (name/coords/rating are slow),
 // and we no longer fetch live hours/open-now, so staleness is low-risk. A long
 // window maximises cross-session reuse — each cache hit is one billed Places
 // Search call avoided.
-const VIEWPORT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const VIEWPORT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const VIEWPORT_CACHE = loadCache('viewport', VIEWPORT_TTL_MS);
 const persistViewport = makeSaver('viewport', { max: 100, getTime: (v) => v.time });
 const COORD_BUCKET = 0.01; // ≈ 1.1 km at the equator

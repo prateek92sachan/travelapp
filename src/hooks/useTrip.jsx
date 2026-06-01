@@ -502,7 +502,7 @@ export function TripProvider({ children }) {
         // staleTime to serve them instead of re-billing a Text Search. An
         // explicit search keeps staleTime 0 so the user gets fresh data.
         // Weather is free (Open-Meteo), so always refetch it.
-        const placesStaleTime = silentRefresh ? 24 * 60 * 60 * 1000 : 0;
+        const placesStaleTime = silentRefresh ? 30 * 24 * 60 * 60 * 1000 : 0;
         const activitiesKey = tabQueryKey({
           tabKey: 'activities',
           destination: dest,

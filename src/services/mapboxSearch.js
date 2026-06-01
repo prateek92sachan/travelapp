@@ -17,7 +17,7 @@ const TIMEOUT_MS = 10000;
 // Mirrors googleMaps.js reverse-geocode cache (own namespace) so reloads don't
 // re-bill. Namespace -en: old localized (e.g. Japanese) entries are ignored
 // rather than served stale. Shared machinery: makeRevGeoCache.
-const { get: revGeoGet, set: revGeoSet } = makeRevGeoCache('mb-revgeo-en');
+const { get: revGeoGet, set: revGeoSet } = makeRevGeoCache('mb-revgeo-en', { ttlMs: 30 * 24 * 60 * 60 * 1000 });
 
 function firstSegment(s) {
   return (s || '').split(',')[0].trim();
