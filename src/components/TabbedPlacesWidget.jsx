@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Compass, Utensils, Leaf, Gem, BedDouble, Navigation, Pencil, Trash2, Star, Sparkles, RotateCw, CalendarPlus } from 'lucide-react';
+import { Navigation, Pencil, Trash2, Star, Sparkles, RotateCw, CalendarPlus } from 'lucide-react';
 import Card from './Card';
 import { useSearchStore } from '../stores/searchStore';
 import { useMapStore } from '../stores/mapStore';
@@ -23,74 +23,11 @@ import { PlacePickerModal, PICKER_TABS } from './PlacePickerModal';
 import PlanSlotChooser from './PlanSlotChooser';
 import { toast } from 'sonner';
 import { formatCount, formatPrice } from '../utils/format';
-import { shortenAddress } from '../utils/shortenAddress';
 import { countPlannedPlaces, ensurePlan, PHASE_LABEL } from '../utils/plan';
-
-const shortListName = shortenAddress;
-
-// City-segment match: ghost may carry a full formatted address ("Cairo,
-// Cairo Governorate, Egypt") while saved list destinations may be just the
-// locality ("Cairo"). Strip to first comma-segment + lowercase so both sides
-// align on the city token.
-function cityKey(s) {
-  return (s || '').split(',')[0].trim().toLowerCase();
-}
-
-// City chip label = city (first address segment) on row 1, country on row 2.
-// Country comes from the stored `list.country`; falls back to the trailing
-// segment of a formatted-address destination for lists created before we
-// tracked it. Keeps the chip compact instead of one long address line.
-function cityCountryLabel(name, destination, country) {
-  const city = shortListName(((name || destination || '').split(',')[0] || '').trim());
-  let land = country || '';
-  if (!land) {
-    const parts = (destination || '').split(',').map((s) => s.trim()).filter(Boolean);
-    if (parts.length >= 2) land = parts[parts.length - 1];
-  }
-  return { city, country: land };
-}
-
-const TabNav = memo(function TabNav({ activeTab, tabs, onSwitch }) {
-  const navRef = useRef(null);
-
-  useEffect(() => {
-    const nav = navRef.current;
-    if (!nav) return;
-    const btn = nav.querySelector(`[data-tab="${activeTab}"]`);
-    if (btn) btn.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
-  }, [activeTab]);
-
-  return (
-    <div className="tab-nav" role="tablist" ref={navRef}>
-      {tabs.map((t) => {
-        const isActive = activeTab === t.key;
-        return (
-          <button
-            key={t.key}
-            role="tab"
-            type="button"
-            data-tab={t.key}
-            aria-selected={isActive}
-            className={`tab-button ${isActive ? 'active' : ''}`}
-            title={t.label}
-            onClick={() => onSwitch(t.key)}
-          >
-            <t.Icon size={19} strokeWidth={2} aria-hidden color={t.color} />
-            {isActive && <span>{t.label}</span>}
-          </button>
-        );
-      })}
-    </div>
-  );
-}, (prev, next) => prev.activeTab === next.activeTab && prev.tabs === next.tabs);
-
-const PLACE_TABS = [
-  { key: 'activities',  label: 'Activities',  Icon: Compass,   color: '#f97316' },
-  { key: 'restaurants', label: 'Restaurants', Icon: Utensils,  color: '#ef4444' },
-  { key: 'nature',      label: 'Nature',      Icon: Leaf,      color: '#22c55e' },
-  { key: 'gems',        label: 'Hidden gems', Icon: Gem,       color: '#6366f1' },
-  { key: 'hotels',      label: 'Hotels',      Icon: BedDouble, color: '#0ea5e9' },
-];
+import { shortListName, cityKey, cityCountryLabel } from './tabbedPlaces/helpers';
+import { TabNav, PLACE_TABS } from './tabbedPlaces/TabNav';
+import { ExpandableDescription } from './tabbedPlaces/ExpandableDescription';
+import { Skeleton } from './tabbedPlaces/Skeleton';
 
 function TabbedPlacesWidget({ expandable = true }) {
   // Search domain
@@ -1309,42 +1246,5 @@ const PlaceDetail = memo(function PlaceDetail({
   prev.activeListName === next.activeListName &&
   !!prev.onAddToPlan === !!next.onAddToPlan
 );
-
-function first30Words(text) {
-  const words = text.trim().split(/\s+/);
-  if (words.length <= 30) return { preview: text, hasMore: false };
-  return { preview: words.slice(0, 30).join(' ') + '…', hasMore: true };
-}
-
-const ExpandableDescription = memo(function ExpandableDescription({ text, expanded, onToggle, wikiUrl }) {
-  const { preview, hasMore } = useMemo(() => first30Words(text), [text]);
-  return (
-    <div className="detail-description-block">
-      <p className="detail-description">
-        {expanded ? text : preview}
-      </p>
-      {hasMore && (
-        <button type="button" className="detail-see-more" onClick={onToggle}>
-          {expanded ? 'See less' : 'See more'}
-        </button>
-      )}
-      {wikiUrl && expanded && (
-        <a href={wikiUrl} target="_blank" rel="noopener noreferrer" className="detail-wiki-link">
-          Read more on Wikipedia
-        </a>
-      )}
-    </div>
-  );
-});
-
-function Skeleton() {
-  return (
-    <div>
-      {[0, 1, 2, 3, 4].map((i) => (
-        <div key={i} className="skeleton skeleton-block" style={{ marginBottom: 8 }} />
-      ))}
-    </div>
-  );
-}
 
 export default memo(TabbedPlacesWidget);
