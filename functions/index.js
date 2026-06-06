@@ -114,6 +114,23 @@ async function fetchGoogleMtd() {
   return buckets;
 }
 
+// Allowlist gate: caller must be signed in with a verified email that has
+// a doc at allowlist/{email}. Mirrors the Firestore security rule so the
+// callables can't be hit by authorized-but-not-allowlisted accounts.
+async function assertAllowed(request) {
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Sign in to continue.');
+  }
+  const email = request.auth.token?.email;
+  if (!email || request.auth.token?.email_verified !== true) {
+    throw new HttpsError('permission-denied', 'A verified email is required.');
+  }
+  const snap = await admin.firestore().doc(`allowlist/${email.toLowerCase()}`).get();
+  if (!snap.exists) {
+    throw new HttpsError('permission-denied', 'Your account is not authorized.');
+  }
+}
+
 // Atomic per-uid daily counter. Returns the post-increment count;
 // throws `resource-exhausted` once cap is reached.
 async function incGeminiQuota(uid) {
@@ -146,9 +163,7 @@ const GEMINI_SUMMARY_SYSTEM = [
 exports.geminiSearchPlace = onCall(
   { cors: true, secrets: [GEMINI_API_KEY], timeoutSeconds: 60 },
   async (request) => {
-    if (!request.auth?.uid) {
-      throw new HttpsError('unauthenticated', 'Sign in to generate summaries.');
-    }
+    await assertAllowed(request);
     const { name, destination } = request.data || {};
     if (typeof name !== 'string' || !name.trim()) {
       throw new HttpsError('invalid-argument', 'name is required.');
@@ -193,9 +208,7 @@ exports.geminiSearchPlace = onCall(
 exports.getCostBreakdown = onCall(
   { cors: true, timeoutSeconds: 20 },
   async (request) => {
-    if (!request.auth?.uid) {
-      throw new HttpsError('unauthenticated', 'Sign in to view cost data.');
-    }
+    await assertAllowed(request);
 
     let google;
     try {

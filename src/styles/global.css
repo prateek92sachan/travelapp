@@ -494,6 +494,20 @@ input { font-family: inherit; }
   transition: background var(--transition);
 }
 .auth-gate-btn:hover { background: var(--accent); }
+.auth-gate-icon-deny { color: var(--accent); display: flex; justify-content: center; }
+.auth-gate-btn-ghost {
+  width: 100%;
+  padding: 11px 16px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border-strong);
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--transition);
+}
+.auth-gate-btn-ghost:hover { border-color: var(--text); }
 
 .auth-avatar-btn {
   width: 34px;
