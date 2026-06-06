@@ -9,6 +9,7 @@ import {
   onAuthStateChanged,
   browserPopupRedirectResolver,
 } from 'firebase/auth';
+import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
 import {
   initializeFirestore,
   persistentLocalCache,
@@ -41,10 +42,24 @@ let _auth = null;
 let _db = null;
 let _functions = null;
 
+const APPCHECK_SITE_KEY = import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY;
+
 function ensureApp() {
   if (_app) return _app;
   if (!firebaseConfig.apiKey) throw new Error('Firebase not configured — set VITE_FIREBASE_* env vars');
   _app = initializeApp(firebaseConfig);
+  // App Check (reCAPTCHA v3) — attests requests to Firestore + Functions.
+  // No-op until a site key is provided. In dev, print a debug token to
+  // register for localhost (App Check Console → Apps → Manage debug tokens).
+  if (APPCHECK_SITE_KEY) {
+    if (import.meta.env.DEV && typeof self !== 'undefined') {
+      self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+    }
+    initializeAppCheck(_app, {
+      provider: new ReCaptchaV3Provider(APPCHECK_SITE_KEY),
+      isTokenAutoRefreshEnabled: true,
+    });
+  }
   return _app;
 }
 
