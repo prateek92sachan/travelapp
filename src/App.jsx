@@ -8,6 +8,7 @@ import PlacesDrawer from './components/PlacesDrawer';
 import EmptyStateGlobe from './components/EmptyStateGlobe';
 import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './components/Dashboard';
+import AuthGate from './components/AuthGate';
 import { useTripSearch } from './hooks/useTrip';
 import { useSearchStore } from './stores/searchStore';
 import { useIsDesktop } from './hooks/useIsDesktop';
@@ -19,15 +20,17 @@ export default function App() {
   }, []);
 
   return (
-    <APIProvider apiKey={GOOGLE_MAPS_KEY}>
-      <div className="app-shell">
-        <Header />
-        <Routes>
-          <Route path="/" element={<MapView />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-        </Routes>
-      </div>
-    </APIProvider>
+    <AuthGate>
+      <APIProvider apiKey={GOOGLE_MAPS_KEY}>
+        <div className="app-shell">
+          <Header />
+          <Routes>
+            <Route path="/" element={<MapView />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+          </Routes>
+        </div>
+      </APIProvider>
+    </AuthGate>
   );
 }
 

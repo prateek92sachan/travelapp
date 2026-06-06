@@ -452,6 +452,49 @@ input { font-family: inherit; }
   box-shadow: 0 2px 8px rgba(0,0,0,0.12);
 }
 
+/* Full-screen access gate shown until the user signs in. */
+.auth-gate {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: 24px;
+}
+.auth-gate-spinner { color: var(--accent); animation: auth-gate-spin 0.9s linear infinite; }
+@keyframes auth-gate-spin { to { transform: rotate(360deg); } }
+.auth-gate-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+  padding: 36px 32px;
+  max-width: 360px;
+  width: 100%;
+  text-align: center;
+}
+.auth-gate-icon { font-size: 44px; line-height: 1; }
+.auth-gate-title { margin: 14px 0 4px; font-size: 22px; font-weight: 700; color: var(--text); }
+.auth-gate-sub { margin: 0 0 24px; font-size: 14px; color: var(--text-muted); }
+.auth-gate-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 16px;
+  border-radius: 999px;
+  border: none;
+  background: var(--accent-hover);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.auth-gate-btn:hover { background: var(--accent); }
+
 .auth-avatar-btn {
   width: 34px;
   height: 34px;
