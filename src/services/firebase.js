@@ -48,13 +48,10 @@ function ensureApp() {
   if (_app) return _app;
   if (!firebaseConfig.apiKey) throw new Error('Firebase not configured — set VITE_FIREBASE_* env vars');
   _app = initializeApp(firebaseConfig);
-  // App Check (reCAPTCHA v3) — attests requests to Firestore + Functions.
-  // No-op until a site key is provided. In dev, print a debug token to
-  // register for localhost (App Check Console → Apps → Manage debug tokens).
-  if (APPCHECK_SITE_KEY) {
-    if (import.meta.env.DEV && typeof self !== 'undefined') {
-      self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
-    }
+  // App Check (reCAPTCHA v3) — attests prod requests to Firestore + Functions.
+  // Skipped in dev: reCAPTCHA has no token for localhost and the debug-token
+  // flow would otherwise abort local Firestore calls.
+  if (APPCHECK_SITE_KEY && import.meta.env.PROD) {
     initializeAppCheck(_app, {
       provider: new ReCaptchaV3Provider(APPCHECK_SITE_KEY),
       isTokenAutoRefreshEnabled: true,
