@@ -1,6 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { Compass, Utensils, Leaf, Gem, BedDouble, Heart, Navigation, Phone, Globe, Pencil, Trash2 } from 'lucide-react';
+import { Star } from 'lucide-react';
 import Card from './Card';
 import { useSearchStore } from '../stores/searchStore';
 import { useMapStore } from '../stores/mapStore';
@@ -9,71 +8,23 @@ import {
   selectLists,
   selectActiveListId,
   selectGhostCity,
+  selectGhostCountry,
   resolveActiveForMode,
 } from '../stores/wishlistStore';
 import { useTabQuery, TAB_KEYS } from '../hooks/queries/useTabQuery';
-import { useNearbyQuery } from '../hooks/queries/useNearbyQuery';
 import { useViewportQuery } from '../hooks/queries/useViewportQuery';
-import { directionsUrl, fetchPlaceDetails } from '../services/googleMaps';
-import { fetchWikiSummary } from '../services/wikipedia';
-import { fetchPlaceDescription } from '../services/gemini';
-import { SavedPlaceCard } from './WishlistPanel';
-import PlanMode from './PlanMode';
-import { formatCount } from '../utils/format';
-import { shortenAddress } from '../utils/shortenAddress';
-import { countPlannedPlaces } from '../utils/plan';
-
-const shortListName = shortenAddress;
-
-// City-segment match: ghost may carry a full formatted address ("Cairo,
-// Cairo Governorate, Egypt") while saved list destinations may be just the
-// locality ("Cairo"). Strip to first comma-segment + lowercase so both sides
-// align on the city token.
-function cityKey(s) {
-  return (s || '').split(',')[0].trim().toLowerCase();
-}
-
-const TabNav = memo(function TabNav({ activeTab, tabs, onSwitch }) {
-  const navRef = useRef(null);
-
-  useEffect(() => {
-    const nav = navRef.current;
-    if (!nav) return;
-    const btn = nav.querySelector(`[data-tab="${activeTab}"]`);
-    if (btn) btn.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
-  }, [activeTab]);
-
-  return (
-    <div className="tab-nav" role="tablist" ref={navRef}>
-      {tabs.map((t) => {
-        const isActive = activeTab === t.key;
-        return (
-          <button
-            key={t.key}
-            role="tab"
-            type="button"
-            data-tab={t.key}
-            aria-selected={isActive}
-            className={`tab-button ${isActive ? 'active' : ''}`}
-            title={t.label}
-            onClick={() => onSwitch(t.key)}
-          >
-            <t.Icon size={19} strokeWidth={2} aria-hidden color={t.color} />
-            {isActive && <span>{t.label}</span>}
-          </button>
-        );
-      })}
-    </div>
-  );
-}, (prev, next) => prev.activeTab === next.activeTab && prev.tabs === next.tabs);
-
-const PLACE_TABS = [
-  { key: 'activities',  label: 'Activities',  Icon: Compass,   color: '#f97316' },
-  { key: 'restaurants', label: 'Restaurants', Icon: Utensils,  color: '#ef4444' },
-  { key: 'nature',      label: 'Nature',      Icon: Leaf,      color: '#22c55e' },
-  { key: 'gems',        label: 'Hidden gems', Icon: Gem,       color: '#6366f1' },
-  { key: 'hotels',      label: 'Hotels',      Icon: BedDouble, color: '#0ea5e9' },
-];
+import PlanSlotChooser from './PlanSlotChooser';
+import { toast } from 'sonner';
+import { ensurePlan, PHASE_LABEL } from '../utils/plan';
+import { shortListName, cityKey } from './tabbedPlaces/helpers';
+import { TabNav, PLACE_TABS } from './tabbedPlaces/TabNav';
+import { Skeleton } from './tabbedPlaces/Skeleton';
+import { PlaceRow } from './tabbedPlaces/PlaceRow';
+import { PlaceDetail } from './tabbedPlaces/PlaceDetail';
+import { useWishlistTabState } from './tabbedPlaces/useWishlistTabState';
+import { WishlistHead } from './tabbedPlaces/WishlistHead';
+import { WishlistListPicker } from './tabbedPlaces/WishlistListPicker';
+import { WishlistBody } from './tabbedPlaces/WishlistBody';
 
 function TabbedPlacesWidget({ expandable = true }) {
   // Search domain
@@ -81,18 +32,21 @@ function TabbedPlacesWidget({ expandable = true }) {
   const switchTab = useSearchStore((s) => s.switchTab);
   const selectedPlaceId = useSearchStore((s) => s.selectedPlaceId);
   const selectedPlace = useSearchStore((s) => s.selectedPlace);
+  const detailPlace = useSearchStore((s) => s.detailPlace);
   const selectPlace = useSearchStore((s) => s.selectPlace);
+  const closeDetail = useSearchStore((s) => s.closeDetail);
   const loading = useSearchStore((s) => s.loading);
 
   // Map domain (mode overrides drive activeTabItems priority)
-  const nearbyAnchor = useMapStore((s) => s.nearbyAnchor);
   const viewportTarget = useMapStore((s) => s.viewportTarget);
   const viewportCity = useMapStore((s) => s.viewportCity);
+  const viewportCountry = useMapStore((s) => s.viewportCountry);
 
   // Wishlist domain
   const wishlistLists = useWishlistStore(selectLists);
   const activeWishlistId = useWishlistStore(selectActiveListId);
   const ghostCity = useWishlistStore(selectGhostCity);
+  const ghostCountry = useWishlistStore(selectGhostCountry);
   const wAddPlace = useWishlistStore((s) => s.addPlace);
   const wAddPlaceSmart = useWishlistStore((s) => s.addPlaceSmart);
   const wRemovePlace = useWishlistStore((s) => s.removePlace);
@@ -103,20 +57,17 @@ function TabbedPlacesWidget({ expandable = true }) {
   const wSetGhostCity = useWishlistStore((s) => s.setGhostCity);
   const wishlist = useWishlistStore((s) => s.wishlist);
 
-  // Derive active items per priority: nearby > viewport > city tab.
+  // Derive active items per priority: viewport > city tab.
   const tabQ = useTabQuery(activeTab);
-  const nearbyQ = useNearbyQuery({ anchor: nearbyAnchor, category: activeTab });
   const vpQ = useViewportQuery({ target: viewportTarget, category: activeTab });
   const activeTabItems = useMemo(() => {
     if (!TAB_KEYS.includes(activeTab)) return [];
-    if (nearbyAnchor) return nearbyQ.data || [];
     if (viewportTarget) return vpQ.data || [];
     return tabQ.data || [];
-  }, [activeTab, nearbyAnchor, viewportTarget, tabQ.data, nearbyQ.data, vpQ.data]);
+  }, [activeTab, viewportTarget, tabQ.data, vpQ.data]);
   const activeTabLoading =
     TAB_KEYS.includes(activeTab) &&
-    ((nearbyAnchor && nearbyQ.isFetching) ||
-      (viewportTarget && vpQ.isFetching) ||
+    ((viewportTarget && vpQ.isFetching) ||
       tabQ.isFetching ||
       loading);
 
@@ -155,7 +106,7 @@ function TabbedPlacesWidget({ expandable = true }) {
     onSelect: (id) => {
       wSelectList(id);
       const list = (wishlistLists || []).find((l) => l.id === id);
-      if (list?.destination) wSetGhostCity(list.destination);
+      if (list?.destination) wSetGhostCity(list.destination, list.country || null);
     },
   });
 
@@ -187,7 +138,7 @@ function TabbedPlacesWidget({ expandable = true }) {
   const addPlaceToWishlist = (place, category, listId = effectiveActiveId) =>
     wAddPlace({ listId, place, category });
   const addPlaceToSmartWishlist = (place, category) =>
-    wAddPlaceSmart({ place, category, viewportCity, fallbackListId: effectiveActiveId });
+    wAddPlaceSmart({ place, category, viewportCity, viewportCountry, fallbackListId: effectiveActiveId });
   const removePlaceFromWishlist = (placeId, listId = effectiveActiveId) =>
     wRemovePlace({ listId, placeId });
   const selectWishlistById = (listId) => wSelectList(listId);
@@ -209,12 +160,57 @@ function TabbedPlacesWidget({ expandable = true }) {
 
   const saveListName = viewportCity
     ? shortListName(viewportCity)
-    : shortListName(activeWishlist?.name);
+    : shortListName(activeWishlist?.name || ghostCity);
 
-  // Use selectedPlace directly — avoids the card vanishing when tab switches
-  // before activeTabItems updates, or when data hasn't loaded yet.
-  const selected = selectedPlace;
+  // Detail card renders from `detailPlace` (set only on row tap / restore),
+  // NOT from `selectedPlace` (which now also reflects pin-tap highlight).
+  // Reading `detailPlace` directly avoids the card vanishing when tab
+  // switches before activeTabItems updates, or when data hasn't loaded yet.
+  const selected = detailPlace;
   const savedCount = activeWishlist?.items?.length || 0;
+
+  const wAddToPlanSlot = useWishlistStore((s) => s.addToPlanSlot);
+  const [detailPlanFor, setDetailPlanFor] = useState(null); // place | null
+  const detailPlanList = useMemo(
+    () =>
+      viewportCity
+        ? wishlistLists.find(
+            (l) => l.mode === 'plan' && l.destination?.toLowerCase() === viewportCity.toLowerCase()
+          )
+        : null,
+    [wishlistLists, viewportCity]
+  );
+  const { detailPlanDayCount, detailHotelFullDays } = useMemo(() => {
+    const p = ensurePlan(detailPlanList?.plan);
+    const full = new Set();
+    p.itinerary.forEach((d, i) => { if ((d.hotels?.length || 0) >= 2) full.add(i); });
+    return { detailPlanDayCount: p.days, detailHotelFullDays: full };
+  }, [detailPlanList]);
+
+  const commitDetailPlan = ({ dayIndex, phase, newDay }) => {
+    if (!detailPlanFor || !viewportCity) { setDetailPlanFor(null); return; }
+    const res = wAddToPlanSlot({
+      destination: viewportCity,
+      country: viewportCountry,
+      place: detailPlanFor,
+      category: activeTab,
+      dayIndex,
+      phase,
+      asHotel: activeTab === 'hotels',
+      newDay,
+    });
+    if (res?.blocked === 'hotelFull') {
+      toast.error(`Day ${res.dayIndex + 1} already has 2 hotels`);
+      return;
+    }
+    if (res) {
+      const label = `Day ${res.dayIndex + 1}`;
+      toast.success(res.asHotel ? `Hotel set · ${label}` : `Added to ${label} · ${PHASE_LABEL[res.phase]}`);
+    } else {
+      toast.error("Couldn't add to plan");
+    }
+    setDetailPlanFor(null);
+  };
 
   // Refs so the re-anchor effect can read current values without them being deps.
   const selectedPlaceIdRef = useRef(selectedPlaceId);
@@ -264,6 +260,7 @@ function TabbedPlacesWidget({ expandable = true }) {
                 activeListId={activeWishlist?.id || null}
                 mode={wishlistState.mode}
                 ghostCity={showGhost ? ghostCity : null}
+                ghostCountry={showGhost ? ghostCountry : null}
                 onGhostClick={onPromoteGhost}
                 editingName={wishlistState.editingName}
                 editValue={wishlistState.editValue}
@@ -305,7 +302,7 @@ function TabbedPlacesWidget({ expandable = true }) {
               aria-pressed={isWishlistTab}
               aria-label="My wishlist"
             >
-              <Heart
+              <Star
                 size={21}
                 strokeWidth={2}
                 aria-hidden
@@ -347,17 +344,22 @@ function TabbedPlacesWidget({ expandable = true }) {
             </div>
           ) : (
             <div className="activity-list">
-              {activeTabItems.map((a, i) => (
+              {activeTabItems.slice(0, 5).map((a, i) => (
                 <PlaceRow
                   key={a.placeId}
                   place={a}
                   index={i}
                   selected={selectedPlaceId === a.placeId}
                   onSelect={() => selectPlace(a)}
-                  saved={isWishlisted(a.placeId, effectiveListId)}
+                  saved={isWishlisted(a, effectiveListId)}
                   activeListName={saveListName}
                   onSave={() => addPlaceToSmartWishlist(a, activeTab)}
-                  onRemove={() => removePlaceFromWishlist(a.placeId, effectiveListId)}
+                  onRemove={() => removePlaceFromWishlist(a, effectiveListId)}
+                  onAddToPlan={() =>
+                    viewportCity
+                      ? setDetailPlanFor(a)
+                      : toast.error('Search a city to add to a plan')
+                  }
                 />
               ))}
             </div>
@@ -368,737 +370,26 @@ function TabbedPlacesWidget({ expandable = true }) {
       {selected && !isWishlistTab && (
         <PlaceDetail
           place={selected}
-          onClose={() => selectPlace(null)}
-          saved={isWishlisted(selected.placeId, effectiveListId)}
+          onClose={closeDetail}
+          saved={isWishlisted(selected, effectiveListId)}
           activeListName={saveListName}
           onSave={() => addPlaceToSmartWishlist(selected, activeTab)}
-          onRemove={() => removePlaceFromWishlist(selected.placeId, effectiveListId)}
+          onRemove={() => removePlaceFromWishlist(selected, effectiveListId)}
+          onAddToPlan={viewportCity ? () => setDetailPlanFor(selected) : undefined}
+        />
+      )}
+
+      {detailPlanFor && (
+        <PlanSlotChooser
+          placeName={detailPlanFor.name}
+          dayCount={detailPlanDayCount}
+          isHotel={activeTab === 'hotels'}
+          hotelFullDays={detailHotelFullDays}
+          onCommit={commitDetailPlan}
+          onClose={() => setDetailPlanFor(null)}
         />
       )}
     </>
-  );
-}
-
-const CATEGORY_OPTIONS = [
-  { value: 'activities', label: 'Activity' },
-  { value: 'restaurants', label: 'Restaurant' },
-  { value: 'nature', label: 'Nature' },
-  { value: 'gems', label: 'Hidden gem' },
-];
-
-const EMPTY_ADD_FORM = { name: '', location: '', category: 'activities', duration: '', cost: '' };
-
-function useWishlistTabState({ activeList, mode, setMode, onRename, onDelete, onSelect }) {
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [addForm, setAddForm] = useState(EMPTY_ADD_FORM);
-  const [editingName, setEditingName] = useState(false);
-  const [editValue, setEditValue] = useState(activeList?.name || '');
-
-  const longPressTimer = useRef(null);
-  const didLongPress = useRef(false);
-  const addFormRef = useRef(null);
-  const editInputRef = useRef(null);
-
-  useEffect(() => {
-    if (showAddForm && addFormRef.current) {
-      addFormRef.current.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    }
-  }, [showAddForm]);
-
-  useEffect(() => {
-    setEditValue(activeList?.name || '');
-    setEditingName(false);
-  }, [activeList?.id, activeList?.name]);
-
-  useEffect(() => {
-    if (editingName) editInputRef.current?.focus();
-  }, [editingName]);
-
-  useEffect(() => () => clearTimeout(longPressTimer.current), []);
-
-  function commitRename() {
-    if (!activeList) return;
-    const next = editValue.trim();
-    if (next && next !== activeList.name) onRename(activeList.id, next);
-    setEditingName(false);
-  }
-
-  function cancelRename() {
-    setEditValue(activeList?.name || '');
-    setEditingName(false);
-  }
-
-  function confirmDelete() {
-    if (!activeList) return;
-    if (window.confirm(`Delete "${activeList.name}"? This removes the list and its saved places.`)) {
-      onDelete(activeList.id);
-    }
-  }
-
-  function handleChipPointerDown() {
-    didLongPress.current = false;
-    longPressTimer.current = setTimeout(() => {
-      didLongPress.current = true;
-      setPickerOpen(true);
-    }, 500);
-  }
-
-  function handleChipPointerUp() {
-    clearTimeout(longPressTimer.current);
-  }
-
-  function handleChipClick(listId) {
-    if (!didLongPress.current) onSelect(listId);
-  }
-
-  return {
-    pickerOpen, setPickerOpen,
-    showAddForm, setShowAddForm,
-    addForm, setAddForm,
-    mode, setMode,
-    editingName, setEditingName,
-    editValue, setEditValue,
-    addFormRef, editInputRef,
-    commitRename, cancelRename, confirmDelete,
-    handleChipPointerDown, handleChipPointerUp, handleChipClick,
-  };
-}
-
-function WishlistHead({ mode, setMode }) {
-  return (
-    <div className="wishlist-mode-tabs" role="tablist" aria-label="View mode">
-      <button
-        type="button"
-        role="tab"
-        aria-selected={mode === 'plan'}
-        className={`wishlist-mode-tab ${mode === 'plan' ? 'active' : ''}`}
-        onClick={() => setMode('plan')}
-      >
-        Plan
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={mode === 'saved'}
-        className={`wishlist-mode-tab ${mode === 'saved' ? 'active' : ''}`}
-        onClick={() => setMode('saved')}
-      >
-        Saved
-      </button>
-    </div>
-  );
-}
-
-function WishlistListPicker({
-  lists,
-  activeListId,
-  mode,
-  ghostCity,
-  onGhostClick,
-  editingName,
-  editValue,
-  editInputRef,
-  setEditValue,
-  setEditingName,
-  onChipPointerDown,
-  onChipPointerUp,
-  onChipClick,
-  onCommitRename,
-  onCancelRename,
-  onConfirmDelete,
-}) {
-  if (lists.length === 0 && !ghostCity) return null;
-  return (
-    <div className="wishlist-list-picker" role="tablist" aria-label="Wishlist lists">
-      {lists.map((list) => {
-        const isActive = activeListId === list.id;
-        return (
-          <div
-            key={list.id}
-            role="tab"
-            tabIndex={0}
-            aria-selected={isActive}
-            className={`wishlist-list-chip ${isActive ? 'active' : ''}`}
-            onPointerDown={onChipPointerDown}
-            onPointerUp={onChipPointerUp}
-            onPointerLeave={onChipPointerUp}
-            onContextMenu={(e) => e.preventDefault()}
-            onClick={() => onChipClick(list.id)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onChipClick(list.id);
-              }
-            }}
-          >
-            {isActive && editingName ? (
-              <input
-                ref={editInputRef}
-                className="wishlist-list-chip-input"
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onBlur={onCommitRename}
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); onCommitRename(); }
-                  else if (e.key === 'Escape') { e.preventDefault(); onCancelRename(); }
-                }}
-                aria-label="List name"
-              />
-            ) : (
-              <>
-                <span>{shortListName(list.name)}</span>
-                <span>
-                  {mode === 'plan'
-                    ? countPlannedPlaces(list.plan)
-                    : list.items.length}
-                </span>
-                {isActive && !editingName && (
-                  <span className="wishlist-list-chip-actions">
-                    <button
-                      type="button"
-                      className="wishlist-chip-action"
-                      onClick={(e) => { e.stopPropagation(); setEditingName(true); }}
-                      aria-label="Rename list"
-                      title="Rename list"
-                    >
-                      <Pencil size={12} strokeWidth={1.75} aria-hidden />
-                    </button>
-                    <button
-                      type="button"
-                      className="wishlist-chip-action"
-                      onClick={(e) => { e.stopPropagation(); onConfirmDelete(); }}
-                      aria-label="Delete list"
-                      title="Delete list"
-                    >
-                      <Trash2 size={12} strokeWidth={1.75} aria-hidden />
-                    </button>
-                  </span>
-                )}
-              </>
-            )}
-          </div>
-        );
-      })}
-      {ghostCity && (
-        <div
-          role="tab"
-          tabIndex={0}
-          aria-selected={!activeListId}
-          className={`wishlist-list-chip ghost ${!activeListId ? 'active' : ''}`}
-          onClick={onGhostClick}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              onGhostClick();
-            }
-          }}
-          title={`Add ${ghostCity} to ${mode === 'plan' ? 'Plan' : 'Saved'}`}
-        >
-          <span>{shortListName(ghostCity)}</span>
-          <span className="wishlist-list-chip-ghost-hint">+</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function WishlistBody({
-  lists,
-  activeList,
-  activeListId,
-  onRemove,
-  mode,
-  ghostCity,
-  onPromoteGhost,
-  pickerOpen,
-  setPickerOpen,
-  showAddForm,
-  setShowAddForm,
-  addForm,
-  setAddForm,
-  addFormRef,
-  onSelect,
-}) {
-  const wAddPlace = useWishlistStore((s) => s.addPlace);
-  const activeWishlistId = useWishlistStore(selectActiveListId);
-  const addPlaceToWishlist = (place, category, listId = activeWishlistId) =>
-    wAddPlace({ listId, place, category });
-
-  // Plan mode: skip the "+ Add city to Plan" empty state. When the current
-  // destination has no plan list yet, auto-create it and drop the user into
-  // Day 1 immediately. Saved mode keeps the manual prompt (per current ask).
-  useEffect(() => {
-    if (mode === 'plan' && !activeList && ghostCity) {
-      onPromoteGhost();
-    }
-  }, [mode, activeList, ghostCity, onPromoteGhost]);
-
-  function handleAddSubmit(e) {
-    e.preventDefault();
-    if (!addForm.name.trim() || !activeWishlistId) return;
-    const place = {
-      placeId: 'manual-' + Date.now() + '-' + Math.random().toString(36).slice(2),
-      name: addForm.name.trim(),
-      address: addForm.location.trim() || undefined,
-      estDuration: addForm.duration.trim() || undefined,
-      estCost: addForm.cost.trim() || undefined,
-    };
-    addPlaceToWishlist(place, addForm.category);
-    setAddForm(EMPTY_ADD_FORM);
-    setShowAddForm(false);
-  }
-
-  return (
-    <div className="wishlist-workspace">
-      {pickerOpen && (
-        <div className="wishlist-picker-overlay">
-          <div className="wishlist-picker-backdrop" onClick={() => setPickerOpen(false)} />
-          <div className="wishlist-picker-panel">
-            <div className="wishlist-picker-title">Your wishlists</div>
-            {lists.map((list) => (
-              <button
-                key={list.id}
-                type="button"
-                className={`wishlist-picker-item ${activeListId === list.id ? 'active' : ''}`}
-                onClick={() => { onSelect(list.id); setPickerOpen(false); }}
-              >
-                <span className="wishlist-picker-item-name">{list.name}</span>
-                <span className="wishlist-picker-item-count">{list.items.length} saved</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!activeList ? (
-        <div className="wishlist-empty-panel">
-          {ghostCity ? (
-            <>
-              <div>No {mode === 'plan' ? 'plan' : 'saved'} list yet for <strong>{ghostCity}</strong>.</div>
-              <button
-                type="button"
-                className="wishlist-add-city-btn"
-                onClick={onPromoteGhost}
-              >
-                + Add {ghostCity} to {mode === 'plan' ? 'Plan' : 'Saved'}
-              </button>
-            </>
-          ) : (
-            <>Search a city to start a {mode === 'plan' ? 'plan' : 'wishlist'}.</>
-          )}
-        </div>
-      ) : (
-        <div className="wishlist-active-panel">
-          {ghostCity && (
-            <button
-              type="button"
-              className="wishlist-add-city-btn inline"
-              onClick={onPromoteGhost}
-            >
-              + Add {ghostCity} to {mode === 'plan' ? 'Plan' : 'Saved'}
-            </button>
-          )}
-          {mode === 'plan' ? (
-            <PlanMode list={activeList} />
-          ) : activeList.items.length === 0 ? (
-            <div className="wishlist-empty-panel">
-              This list is empty. Go back to Activities, Restaurants, Nature, or Hidden gems and save cards.
-            </div>
-          ) : (
-            <div className="wishlist-card-list">
-              {activeList.items.map((item) => (
-                <SavedPlaceCard
-                  key={item.placeId}
-                  item={item}
-                  onRemove={() => onRemove(item.placeId, activeList.id)}
-                />
-              ))}
-            </div>
-          )}
-
-          {mode === 'saved' && (
-            <button
-              type="button"
-              className={`wishlist-add-trigger ${showAddForm ? 'open' : ''}`}
-              onClick={() => setShowAddForm((v) => !v)}
-            >
-              {showAddForm ? '✕' : '+ Add'}
-            </button>
-          )}
-
-          {mode === 'saved' && showAddForm && (
-            <form ref={addFormRef} className="wishlist-add-form" onSubmit={handleAddSubmit}>
-              <input
-                className="input"
-                placeholder="Place name *"
-                required
-                value={addForm.name}
-                onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))}
-              />
-              <input
-                className="input"
-                placeholder="Location / city"
-                value={addForm.location}
-                onChange={(e) => setAddForm((f) => ({ ...f, location: e.target.value }))}
-              />
-              <select
-                className="input"
-                value={addForm.category}
-                onChange={(e) => setAddForm((f) => ({ ...f, category: e.target.value }))}
-              >
-                {CATEGORY_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-              <div className="wishlist-add-form-row">
-                <input
-                  className="input"
-                  placeholder="Duration (e.g. 2 hrs)"
-                  value={addForm.duration}
-                  onChange={(e) => setAddForm((f) => ({ ...f, duration: e.target.value }))}
-                />
-                <input
-                  className="input"
-                  placeholder="Cost (e.g. $$)"
-                  value={addForm.cost}
-                  onChange={(e) => setAddForm((f) => ({ ...f, cost: e.target.value }))}
-                />
-              </div>
-              <button type="submit" className="btn" style={{ width: '100%' }}>Add to list</button>
-            </form>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-const PlaceRow = memo(function PlaceRow({
-  place: a,
-  index: i,
-  selected,
-  onSelect,
-  saved,
-  activeListName,
-  onSave,
-  onRemove
-}) {
-  const description = a.wiki?.extract || a.summary;
-  const truncated =
-    description?.length > 140 ? description.slice(0, 140).trim() + '...' : description;
-
-  const onKeyDown = (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      onSelect();
-    }
-  };
-
-  const toggleWishlist = (e) => {
-    e.stopPropagation();
-    if (saved) onRemove();
-    else onSave();
-  };
-
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      className={`activity-item ${selected ? 'selected' : ''}`}
-      data-place-id={a.placeId}
-      onClick={onSelect}
-      onKeyDown={onKeyDown}
-      aria-pressed={selected}
-    >
-      {a.photoUrl && (
-        <div className="activity-photo">
-          <img
-            src={a.photoUrl}
-            alt={a.name}
-            loading="lazy"
-            onError={(e) => {
-              e.currentTarget.style.display = 'none';
-            }}
-          />
-        </div>
-      )}
-      <div className="activity-content">
-        <div className="activity-row-top">
-          <span className="activity-num">{i + 1}</span>
-          <div className="activity-name">{a.name}</div>
-        </div>
-        <div className="activity-summary">{truncated}</div>
-        <div className="activity-tags">
-          <span className="tag">{a.estDuration}</span>
-          <span className="tag">{a.estCost}</span>
-          {a.rating != null && (
-            <span className="tag">
-              {a.rating}
-              {a.reviewCount > 0 && (
-                <span style={{ opacity: 0.7, marginLeft: 4 }}>
-                  ({formatCount(a.reviewCount)})
-                </span>
-              )}
-            </span>
-          )}
-        </div>
-        <button
-          type="button"
-          className={`wishlist-action ${saved ? 'saved' : ''}`}
-          onClick={toggleWishlist}
-          aria-label={`${saved ? 'Remove' : 'Save'} ${a.name} ${saved ? 'from' : 'to'} wishlist`}
-          title={`${saved ? 'Remove from' : 'Save to'} ${activeListName || 'wishlist'}`}
-        >
-          <span aria-hidden>{saved ? '✓' : '+'}</span>
-          <span>{saved ? 'Saved' : `Save to ${activeListName || 'wishlist'}`}</span>
-        </button>
-      </div>
-    </div>
-  );
-// Ignore callback prop identity changes — functions are stable in behavior.
-// Only re-render when data or selection state changes.
-}, (prev, next) =>
-  prev.place === next.place &&
-  prev.index === next.index &&
-  prev.selected === next.selected &&
-  prev.saved === next.saved &&
-  prev.activeListName === next.activeListName
-);
-
-function hostnameOf(url) {
-  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
-}
-
-const PlaceDetail = memo(function PlaceDetail({
-  place,
-  onClose,
-  saved,
-  activeListName,
-  onSave,
-  onRemove
-}) {
-  const destination = useSearchStore((s) => s.destination);
-  const isManual = place.placeId?.startsWith('manual-');
-
-  const [details, setDetails] = useState(null);
-  const [wikiData, setWikiData] = useState(undefined);
-  const [geminiDesc, setGeminiDesc] = useState(null);
-  const [detailsLoading, setDetailsLoading] = useState(!isManual);
-  const [hoursOpen, setHoursOpen] = useState(false);
-  const [descExpanded, setDescExpanded] = useState(false);
-
-  useEffect(() => {
-    if (isManual) return;
-    let cancelled = false;
-    setDetails(null);
-    setWikiData(undefined);
-    setGeminiDesc(null);
-    setDescExpanded(false);
-    setDetailsLoading(true);
-
-    const p1 = fetchPlaceDetails(place.placeId)
-      .then((d) => { if (!cancelled) setDetails(d); })
-      .catch(() => { if (!cancelled) setDetails(null); });
-
-    const p2 = place.wiki
-      ? Promise.resolve(setWikiData(place.wiki))
-      : fetchWikiSummary(place.name, destination)
-          .then((w) => { if (!cancelled) setWikiData(w); })
-          .catch(() => { if (!cancelled) setWikiData(null); });
-
-    const p3 = fetchPlaceDescription(place)
-      .then((d) => { if (!cancelled) setGeminiDesc(d); })
-      .catch(() => { if (!cancelled) setGeminiDesc(null); });
-
-    Promise.all([p1, p2, p3]).then(() => { if (!cancelled) setDetailsLoading(false); });
-
-    return () => { cancelled = true; };
-  }, [place.placeId, destination]);
-
-  const wikiExtract = wikiData?.extract ?? place.wiki?.extract ?? null;
-  const wikiUrl = wikiData?.url ?? place.wiki?.url ?? null;
-  // Gemini primary → wiki full extract fallback → editorial summary last resort
-  const richDescription = geminiDesc || wikiExtract || details?.editorialSummary || null;
-
-  const toggleWishlist = () => { if (saved) onRemove(); else onSave(); };
-
-  return createPortal(
-    <>
-      <div className="detail-backdrop" onClick={onClose} aria-hidden />
-    <div className="detail-panel" role="dialog" aria-label="Place details">
-      <div className="detail-header">
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h4 className="detail-title">{place.name}</h4>
-          <p className="detail-address">{place.address}</p>
-        </div>
-        <button type="button" className="icon-btn" onClick={onClose} aria-label="Close details" style={{ width: 32, height: 32 }}>
-          ✕
-        </button>
-      </div>
-
-      {place.photoUrl && (
-        <div className="detail-photo">
-          <img src={place.photoUrl} alt={place.name} onError={(e) => (e.currentTarget.style.display = 'none')} />
-        </div>
-      )}
-
-      {/* Open now badge + hours */}
-      {detailsLoading ? (
-        <div className="skeleton" style={{ height: 22, width: 72, margin: '10px 0 0', borderRadius: 999 }} />
-      ) : details?.openNow != null && (
-        <div className="detail-open-row">
-          <span className={`detail-open-badge ${details.openNow ? 'open' : 'closed'}`}>
-            {details.openNow ? 'Open now' : 'Closed'}
-          </span>
-          {details.weekdayHours.length > 0 && (
-            <button type="button" className="detail-hours-toggle" onClick={() => setHoursOpen((v) => !v)}>
-              {hoursOpen ? 'Hide hours' : 'See hours'}
-            </button>
-          )}
-        </div>
-      )}
-      {hoursOpen && details?.weekdayHours.length > 0 && (
-        <div className="detail-hours">
-          {details.weekdayHours.map((h, i) => (
-            <div key={i} className="detail-hour-row">{h}</div>
-          ))}
-        </div>
-      )}
-
-      {/* Description */}
-      {richDescription && (
-        <ExpandableDescription
-          text={richDescription}
-          expanded={descExpanded}
-          onToggle={() => setDescExpanded((v) => !v)}
-          wikiUrl={!geminiDesc ? wikiUrl : null}
-        />
-      )}
-
-      {/* Stats */}
-      <div className="detail-stats">
-        <div className="detail-stat">
-          <div className="k">Duration</div>
-          <div className="v">{place.estDuration}</div>
-        </div>
-        <div className="detail-stat">
-          <div className="k">Cost</div>
-          <div className="v">{details?.priceLevel || place.estCost}</div>
-        </div>
-        {place.rating != null && (
-          <div className="detail-stat">
-            <div className="k">Rating</div>
-            <div className="v">
-              {place.rating}
-              {place.reviewCount > 0 && (
-                <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 4 }}>
-                  ({formatCount(place.reviewCount)})
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Contact: phone + website */}
-      {!detailsLoading && (details?.phone || details?.website) && (
-        <div className="detail-contact">
-          {details.phone && (
-            <a href={`tel:${details.phone}`} className="detail-contact-item">
-              <Phone size={12} strokeWidth={2} aria-hidden />
-              {details.phone}
-            </a>
-          )}
-          {details.website && (
-            <a href={details.website} target="_blank" rel="noopener noreferrer" className="detail-contact-item">
-              <Globe size={12} strokeWidth={2} aria-hidden />
-              {hostnameOf(details.website)}
-            </a>
-          )}
-        </div>
-      )}
-
-      {/* Reviews */}
-      {details?.reviews?.length > 0 && (
-        <div className="detail-reviews">
-          <div className="detail-section-label">Reviews</div>
-          {details.reviews.map((r, i) => (
-            <div key={i} className="detail-review">
-              <div className="detail-review-header">
-                <span className="detail-review-author">{r.author}</span>
-                <span className="detail-review-meta">
-                  {'★'.repeat(Math.floor(r.rating ?? 0))}{r.time ? ` · ${r.time}` : ''}
-                </span>
-              </div>
-              {r.text && (
-                <p className="detail-review-text">
-                  {r.text.length > 200 ? r.text.slice(0, 200) + '…' : r.text}
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="detail-actions">
-        <button type="button" className={`btn detail-save-btn ${saved ? 'btn-ghost' : ''}`} onClick={toggleWishlist}>
-          <Heart size={14} strokeWidth={2} fill={saved ? 'currentColor' : 'none'} aria-hidden />
-          {saved ? 'Saved' : 'Save'}
-        </button>
-        <a className="btn btn-outline detail-dir-btn" href={directionsUrl(place)} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
-          <Navigation size={14} strokeWidth={2} aria-hidden />
-          Directions
-        </a>
-        <button type="button" className="btn btn-ghost detail-close-btn" onClick={onClose}>
-          Close
-        </button>
-      </div>
-    </div>
-    </>,
-    document.body
-  );
-}, (prev, next) =>
-  prev.place === next.place &&
-  prev.saved === next.saved &&
-  prev.activeListName === next.activeListName
-);
-
-function first30Words(text) {
-  const words = text.trim().split(/\s+/);
-  if (words.length <= 30) return { preview: text, hasMore: false };
-  return { preview: words.slice(0, 30).join(' ') + '…', hasMore: true };
-}
-
-const ExpandableDescription = memo(function ExpandableDescription({ text, expanded, onToggle, wikiUrl }) {
-  const { preview, hasMore } = useMemo(() => first30Words(text), [text]);
-  return (
-    <div className="detail-description-block">
-      <p className="detail-description">
-        {expanded ? text : preview}
-      </p>
-      {hasMore && (
-        <button type="button" className="detail-see-more" onClick={onToggle}>
-          {expanded ? 'See less' : 'See more'}
-        </button>
-      )}
-      {wikiUrl && expanded && (
-        <a href={wikiUrl} target="_blank" rel="noopener noreferrer" className="detail-wiki-link">
-          Read more on Wikipedia
-        </a>
-      )}
-    </div>
-  );
-});
-
-function Skeleton() {
-  return (
-    <div>
-      {[0, 1, 2, 3, 4].map((i) => (
-        <div key={i} className="skeleton skeleton-block" style={{ marginBottom: 8 }} />
-      ))}
-    </div>
   );
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useTrip } from '../hooks/useTrip';
+import { useTripSearch } from '../hooks/useTrip';
 import { useWishlistStore, selectLists } from '../stores/wishlistStore';
 import { useSearchStore } from '../stores/searchStore';
 
@@ -35,9 +35,7 @@ function featureToPath(feature) {
 export default function EmptyStateGlobe() {
   const wishlistLists = useWishlistStore(selectLists);
   const setDestination = useSearchStore((s) => s.setDestination);
-  // `search` is still a cross-domain orchestrator on TripContext; everything
-  // else this component needs is served directly by stores.
-  const { search } = useTrip();
+  const search = useTripSearch();
   const [selectedListId, setSelectedListId] = useState('all');
   const [countries, setCountries] = useState([]);
   const [dark, setDark] = useState(isDarkTheme());
@@ -169,7 +167,7 @@ export default function EmptyStateGlobe() {
           const top = ((90 - pt.lat) / 180) * 100;
           return (
             <button
-              key={pt.placeId}
+              key={`${pt.listId}:${pt.placeId}`}
               type="button"
               className="worldmap-pin"
               style={{ left: `${left}%`, top: `${top}%` }}

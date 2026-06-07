@@ -1,0 +1,244 @@
+// Tmap renderer — a Mapbox GL map whose POI data is sourced entirely from
+// Mapbox (via placesProvider, which routes to tmapService when the provider is
+// 'tmap'). Structurally a sibling of MapboxMapInner; the deliberate difference
+// is that pan reverse-geocoding here calls the Mapbox geocoder directly (no
+// Google fallback) so Tmap stays 100% Google-free.
+
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { Map } from 'react-map-gl/mapbox';
+import 'mapbox-gl/dist/mapbox-gl.css';
+import { MAPBOX_TOKEN } from '../../services/config';
+import {
+  reverseGeocodePlaceNameMapbox,
+  reverseGeocodeCityMapbox
+} from '../../services/mapboxSearch';
+import { useSearchStore } from '../../stores/searchStore';
+import { useMapStore } from '../../stores/mapStore';
+import { useTheme } from '../../hooks/useTheme';
+import MapControlsPanel from '../MapControlsPanel';
+import { haversineKm } from '../../utils/geo';
+import {
+  CATEGORY_KEYS,
+  VIEWPORT_DEBOUNCE_MS,
+  VIEWPORT_MIN_MOVE_KM,
+  BOX_SEARCH_MIN_ZOOM
+} from './constants';
+import { densestCentroid, insetBounds, applyPannedPlace } from './helpers';
+import { mapboxStyleFor, POIMarker } from './mapboxShared';
+import MapFloatingHeader from './MapFloatingHeader';
+import { useMapData } from './useMapData';
+
+export default function TmapMapInner({
+  center, mapType, visibleCategories, toggleCategory
+}) {
+  const { theme } = useTheme();
+  const mapRef = useRef(null);
+  const {
+    loading,
+    selectedPlaceId,
+    viewportItems,
+    tabData,
+    markersForCat,
+    onPinTap,
+    cityWideSearch,
+    boxSearchHere,
+    clearViewportItems,
+    actionsDisabled
+  } = useMapData();
+
+  const transitOn = useMapStore((s) => s.transitOn);
+  const setPlaceDisplay = useSearchStore((s) => s.setPlaceDisplay);
+
+  const mapStyle = useMemo(() => mapboxStyleFor(mapType, theme), [mapType, theme]);
+
+  function getMap() {
+    return mapRef.current?.getMap?.() || null;
+  }
+
+  const onSearchHere = useCallback(() => {
+    const map = getMap();
+    if (!map) { cityWideSearch(); return; }
+    const zoom = map.getZoom();
+    if (typeof zoom === 'number' && zoom < BOX_SEARCH_MIN_ZOOM) { cityWideSearch(); return; }
+    const b = map.getBounds();
+    if (!b) { cityWideSearch(); return; }
+    const raw = {
+      low:  { lat: b.getSouth(), lng: b.getWest() },
+      high: { lat: b.getNorth(), lng: b.getEast() }
+    };
+    const bounds = insetBounds(raw);
+    const lat = (bounds.low.lat + bounds.high.lat) / 2;
+    const lng = (bounds.low.lng + bounds.high.lng) / 2;
+    boxSearchHere({ lat, lng, bounds });
+  }, [boxSearchHere, cityWideSearch]);
+
+  // ---- Center sync: pan on prop change + travelapp:panToCity event --------
+  useEffect(() => {
+    const map = getMap();
+    if (!map) return;
+    map.easeTo({ center: [center.lng, center.lat], zoom: 12 });
+  }, [center.lat, center.lng]);
+
+  useEffect(() => {
+    function onReset(e) {
+      const { lat: rlat, lng: rlng } = e.detail || {};
+      if (typeof rlat !== 'number') return;
+      const map = getMap();
+      if (!map) return;
+      map.easeTo({ center: [rlng, rlat], zoom: 12 });
+    }
+    window.addEventListener('travelapp:panToCity', onReset);
+    return () => window.removeEventListener('travelapp:panToCity', onReset);
+  }, []);
+
+  // ---- Focus listener: pan to a specific marker --------------------------
+  useEffect(() => {
+    function onFocus(e) {
+      const { lat, lng } = e.detail || {};
+      if (typeof lat !== 'number' || typeof lng !== 'number') return;
+      const map = getMap();
+      if (!map) return;
+      map.easeTo({ center: [lng, lat] });
+    }
+    window.addEventListener('travelapp:focusLocation', onFocus);
+    return () => window.removeEventListener('travelapp:focusLocation', onFocus);
+  }, []);
+
+  // ---- Density centering: fire once after pins resolve -------------------
+  const densityFiredRef = useRef(false);
+  useEffect(() => {
+    if (densityFiredRef.current || viewportItems) return;
+    const all = [];
+    for (const cat of CATEGORY_KEYS) {
+      const items = tabData?.[cat] || [];
+      for (const p of items.slice(0, 7)) {
+        if (typeof p.lat === 'number' && typeof p.lng === 'number') all.push(p);
+      }
+    }
+    if (all.length < 3) return;
+    const target = densestCentroid(all);
+    if (!target) return;
+    const map = getMap();
+    if (!map) return;
+    densityFiredRef.current = true;
+    map.easeTo({ center: [target.lng, target.lat] });
+  }, [tabData, viewportItems]);
+
+  useEffect(() => {
+    densityFiredRef.current = false;
+  }, [center.lat, center.lng]);
+
+  // ---- Style-bound layers: transit visibility --------------------------
+  // Re-applied on every styledata event (style swaps drop custom layer state).
+  useEffect(() => {
+    const map = getMap();
+    if (!map) return;
+
+    function apply() {
+      if (!map.isStyleLoaded()) return;
+      const style = map.getStyle();
+      if (style?.layers) {
+        for (const layer of style.layers) {
+          const isTransit =
+            layer['source-layer'] === 'transit' ||
+            (typeof layer.id === 'string' && layer.id.includes('transit'));
+          if (isTransit) {
+            try {
+              map.setLayoutProperty(layer.id, 'visibility', transitOn ? 'visible' : 'none');
+            } catch {}
+          }
+        }
+      }
+    }
+
+    apply();
+    map.on('styledata', apply);
+    return () => {
+      map.off('styledata', apply);
+    };
+  }, [transitOn]);
+
+  // ---- moveend watcher: reverse-geocode chip update only -----------------
+  // Pure Mapbox geocoder (no Google fallback) — the whole point of Tmap. Only
+  // updates the area/city display chip + ghost/viewport city; does NOT refetch
+  // places (user must press "Search here").
+  const firstMoveSkippedRef = useRef(false);
+  const lastSearchHereRef = useRef(null);
+  const shDebRef = useRef(null);
+  const shSeqRef = useRef(0);
+
+  useEffect(() => {
+    firstMoveSkippedRef.current = false;
+    lastSearchHereRef.current = null;
+  }, [center.lat, center.lng]);
+
+  useEffect(() => {
+    return () => {
+      if (shDebRef.current) clearTimeout(shDebRef.current);
+    };
+  }, []);
+
+  const handleMoveEnd = useCallback(() => {
+    const map = getMap();
+    if (!map) return;
+    if (!firstMoveSkippedRef.current) {
+      firstMoveSkippedRef.current = true;
+      return;
+    }
+
+    const c = map.getCenter();
+    const next = { lat: c.lat, lng: c.lng };
+
+    const lastSh = lastSearchHereRef.current;
+    if (lastSh && haversineKm(lastSh, next) < VIEWPORT_MIN_MOVE_KM) return;
+
+    if (shDebRef.current) clearTimeout(shDebRef.current);
+    shDebRef.current = setTimeout(async () => {
+      lastSearchHereRef.current = next;
+      const seq = ++shSeqRef.current;
+      const [name, locality] = await Promise.all([
+        reverseGeocodePlaceNameMapbox({ lat: next.lat, lng: next.lng }).catch(() => null),
+        reverseGeocodeCityMapbox({ lat: next.lat, lng: next.lng }).catch(() => null)
+      ]);
+      if (seq !== shSeqRef.current) return;
+      applyPannedPlace({ name, locality }, setPlaceDisplay);
+    }, VIEWPORT_DEBOUNCE_MS);
+  }, [setPlaceDisplay]);
+
+  return (
+    <div className="map-container">
+      <MapFloatingHeader
+        onSearchHere={onSearchHere}
+        onClearViewport={clearViewportItems}
+        actionsDisabled={actionsDisabled}
+        searchLoading={loading}
+        visibleCategories={visibleCategories}
+        onToggleCategory={toggleCategory}
+      />
+      <Map
+        ref={mapRef}
+        mapboxAccessToken={MAPBOX_TOKEN}
+        initialViewState={{ longitude: center.lng, latitude: center.lat, zoom: 12 }}
+        mapStyle={mapStyle}
+        onMoveEnd={handleMoveEnd}
+        style={{ width: '100%', height: '100%' }}
+      >
+        {CATEGORY_KEYS.map((cat) =>
+          visibleCategories[cat]
+            ? markersForCat(cat).map((poi, i) => (
+                <POIMarker
+                  key={poi.placeId}
+                  poi={poi}
+                  index={i}
+                  category={cat}
+                  isSelected={selectedPlaceId === poi.placeId}
+                  onSelect={onPinTap}
+                />
+              ))
+            : null
+        )}
+      </Map>
+      <MapControlsPanel />
+    </div>
+  );
+}

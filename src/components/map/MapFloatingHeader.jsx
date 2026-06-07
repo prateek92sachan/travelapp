@@ -1,14 +1,21 @@
-import { Settings } from 'lucide-react';
+import { RotateCcw } from 'lucide-react';
 import { useMapStore } from '../../stores/mapStore';
 import { CATEGORY_CONFIG, CATEGORY_KEYS } from './constants';
 
 export default function MapFloatingHeader({
-  onSearchHere, onClearViewport, actionsDisabled, searchLoading, nearbyAnchor,
+  onSearchHere, onClearViewport, actionsDisabled, searchLoading,
   visibleCategories, onToggleCategory
 }) {
   return (
-    <div className="map-floating-header">
-      <div className="map-action-group">
+    <>
+      <div className="map-floating-header">
+        <ProviderToggle />
+        <div className="map-floating-center" />
+        <div className="map-header-right">
+          <CategoryTogglePanel visible={visibleCategories} onToggle={onToggleCategory} />
+        </div>
+      </div>
+      <div className="map-floating-footer">
         <button
           type="button"
           className="viewport-pill clear"
@@ -16,24 +23,20 @@ export default function MapFloatingHeader({
           disabled={actionsDisabled}
           title="Search for places centered on the current map view"
         >
-          {searchLoading && !nearbyAnchor ? 'Searching…' : 'Search here'}
+          {searchLoading ? 'Searching…' : 'Search here'}
         </button>
         <button
           type="button"
-          className="viewport-pill"
+          className="viewport-pill icon-only"
           onClick={onClearViewport}
           disabled={actionsDisabled}
           title="Reset to city-wide results and pan back to city"
+          aria-label="Reset to city view"
         >
-          Reset to city view
+          <RotateCcw size={13} strokeWidth={1.75} aria-hidden />
         </button>
-        <ProviderToggle />
       </div>
-      <div className="map-floating-center" />
-      <div className="map-header-right">
-        <CategoryTogglePanel visible={visibleCategories} onToggle={onToggleCategory} />
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -60,6 +63,15 @@ function ProviderToggle() {
       >
         Mapbox
       </button>
+      <button
+        type="button"
+        className={`provider-toggle-btn${provider === 'tmap' ? ' active' : ''}`}
+        onClick={() => setProvider('tmap')}
+        aria-pressed={provider === 'tmap'}
+        title="Use Tmap (pure Mapbox data)"
+      >
+        Tmap
+      </button>
     </div>
   );
 }
@@ -75,7 +87,6 @@ function CategoryTogglePanel({ visible, onToggle }) {
             key={cat}
             type="button"
             className={`cat-toggle-btn ${on ? 'on' : 'off'}`}
-            style={on ? { borderColor: color + '55', background: color + '18' } : undefined}
             onClick={() => onToggle(cat)}
             title={`${on ? 'Hide' : 'Show'} ${label}`}
             aria-pressed={on}

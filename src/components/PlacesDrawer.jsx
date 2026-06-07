@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Compass, Utensils, Leaf, Gem, BedDouble, Heart, Map } from 'lucide-react';
+import { Compass, Utensils, Leaf, Gem, BedDouble, Star, Map } from 'lucide-react';
 import TabbedPlacesWidget from './TabbedPlacesWidget';
 import { useIsDesktop } from '../hooks/useIsDesktop';
-import { useTrip } from '../hooks/useTrip';
+import { useSearchStore } from '../stores/searchStore';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 
 const MOBILE_TABS = [
@@ -12,12 +12,13 @@ const MOBILE_TABS = [
   { key: 'nature',      Icon: Leaf,      label: 'Nature',      color: '#22c55e' },
   { key: 'gems',        Icon: Gem,       label: 'Hidden gems', color: '#6366f1' },
   { key: 'hotels',      Icon: BedDouble, label: 'Hotels',      color: '#0ea5e9' },
-  { key: 'wishlist',    Icon: Heart,     label: 'Wishlist',    color: '#ff385c', dividerBefore: true },
+  { key: 'wishlist',    Icon: Star,      label: 'Wishlist',    color: '#ff385c', dividerBefore: true },
 ];
 
 export default function PlacesDrawer() {
   const isDesktop = useIsDesktop();
-  const { activeTab, switchTab } = useTrip();
+  const activeTab = useSearchStore((s) => s.activeTab);
+  const switchTab = useSearchStore((s) => s.switchTab);
   const [desktopExpanded, setDesktopExpanded] = useState(false);
   const drawerRef = useRef(null);
   const [mobileExpanded, setMobileExpanded] = useState(false);

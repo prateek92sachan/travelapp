@@ -1,5 +1,5 @@
 const KEY = 'travel-app:place-cache';
-const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const MAX = 5;
 
 function cacheKey(dest, date) {

@@ -3,14 +3,10 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   browserPopupRedirectResolver,
 } from '../services/firebase';
-
-const isMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 const AuthContext = createContext(null);
 
@@ -26,9 +22,6 @@ export function AuthProvider({ children }) {
     let unsubscribe;
     try {
       const auth = getAuth();
-      getRedirectResult(auth, browserPopupRedirectResolver)
-        .then((result) => { if (result?.user) setUser(result.user); })
-        .catch((err) => console.warn('Redirect result error:', err));
       unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
         setUser(firebaseUser);
         setAuthReady(true);
@@ -43,9 +36,6 @@ export function AuthProvider({ children }) {
   const signIn = useCallback(async () => {
     const auth = getAuth();
     const provider = new GoogleAuthProvider();
-    if (isMobile()) {
-      return signInWithRedirect(auth, provider, browserPopupRedirectResolver);
-    }
     return signInWithPopup(auth, provider, browserPopupRedirectResolver);
   }, []);
 

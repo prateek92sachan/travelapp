@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, useCallback, useEffect } from 'react';
+import { memo, useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   BedDouble,
@@ -7,18 +7,12 @@ import {
   Sun,
   Sunset,
   Moon,
-  Heart,
-  Check,
-  Compass,
-  Utensils,
-  Leaf,
-  Gem,
   Trash2,
 } from 'lucide-react';
 import { useSearchStore } from '../stores/searchStore';
 import { useMapStore } from '../stores/mapStore';
 import { useWishlistStore, selectLists } from '../stores/wishlistStore';
-import { useTabQuery } from '../hooks/queries/useTabQuery';
+import { useTabQuery, prefetchTab } from '../hooks/queries/useTabQuery';
 import { useViewportQuery } from '../hooks/queries/useViewportQuery';
 import {
   PHASES,
@@ -35,16 +29,8 @@ import {
   formatDuration,
 } from '../utils/plan';
 import { formatCount } from '../utils/format';
-
-const PICKER_TABS = [
-  { key: 'activities',  label: 'Activities',  Icon: Compass,   color: '#f97316' },
-  { key: 'restaurants', label: 'Restaurants', Icon: Utensils,  color: '#ef4444' },
-  { key: 'nature',      label: 'Nature',      Icon: Leaf,      color: '#22c55e' },
-  { key: 'gems',        label: 'Hidden gems', Icon: Gem,       color: '#6366f1' },
-  { key: 'hotels',      label: 'Hotels',      Icon: BedDouble, color: '#0ea5e9' },
-];
-const SESSION_TABS = PICKER_TABS.filter((t) => t.key !== 'hotels');
-const TAB_BY_KEY = Object.fromEntries(PICKER_TABS.map((t) => [t.key, t]));
+import { fetchWikiSummary, isWikiMatch } from '../services/wikipedia';
+import { PlacePickerModal, PICKER_TABS, SESSION_TABS } from './PlacePickerModal';
 
 const PHASE_ICON = { morning: Sun, evening: Sunset, night: Moon };
 const PHASE_COLOR = { morning: '#f59e0b', evening: '#f97316', night: '#6366f1' };
@@ -137,16 +123,78 @@ export default function PlanMode({ list }) {
     if (!savedListIdForCity) return false;
     return useWishlistStore.getState().isWishlisted(savedListIdForCity, placeId);
   };
-  const fetchTabIfNeeded = () => {}; // queries auto-fetch; noop for compat
+  const fetchTabIfNeeded = prefetchTab; // lazy-load a picker tab the drawer never opened
   const plan = useMemo(() => ensurePlan(list?.plan), [list?.plan]);
 
   const items = list?.items || [];
+
+  // Flat placeId → live place map across every category currently loaded
+  // (city tabs + panned viewport). Lets a plan card borrow a fresh photo a
+  // snapshot was frozen without. Pure cache read — no network.
+  const liveById = useMemo(() => {
+    const m = {};
+    const add = (arr) => {
+      if (Array.isArray(arr)) for (const p of arr) if (p?.placeId && !m[p.placeId]) m[p.placeId] = p;
+    };
+    for (const k of Object.keys(tabData)) add(tabData[k]);
+    if (viewportItems) for (const k of Object.keys(viewportItems)) add(viewportItems[k]);
+    return m;
+  }, [tabData, viewportItems]);
+
   const itemById = useMemo(() => {
     const map = { ...(plan.placeSnapshots || {}) };
     // list.items wins over snapshots (more up-to-date fields like wiki enrichment).
     for (const it of items) map[it.placeId] = it;
+    // Borrow a photo from live query data for any entry still missing one.
+    for (const id of Object.keys(map)) {
+      if (!map[id]?.photoUrl && liveById[id]?.photoUrl) {
+        map[id] = { ...map[id], photoUrl: liveById[id].photoUrl };
+      }
+    }
     return map;
-  }, [items, plan.placeSnapshots]);
+  }, [items, plan.placeSnapshots, liveById]);
+
+  // Persist photos into photoless snapshots: borrow from live cache, else run
+  // the (guarded) free Wikipedia lookup, then write back into the plan so the
+  // photo survives reloads and revisits. Each placeId is attempted once.
+  const photoAttemptedRef = useRef(new Set());
+  useEffect(() => {
+    const snaps = plan.placeSnapshots || {};
+    const todo = Object.entries(snaps).filter(
+      ([id, s]) => s && !s.photoUrl && !photoAttemptedRef.current.has(id)
+    );
+    if (!todo.length) return undefined;
+    let cancelled = false;
+    (async () => {
+      const updates = {};
+      await Promise.all(
+        todo.map(async ([id, s]) => {
+          photoAttemptedRef.current.add(id);
+          if (liveById[id]?.photoUrl) {
+            updates[id] = liveById[id].photoUrl;
+            return;
+          }
+          const wiki = await fetchWikiSummary(s.name, list?.destination);
+          if (wiki?.thumbnail && isWikiMatch(s, wiki)) updates[id] = wiki.thumbnail;
+        })
+      );
+      if (cancelled || !Object.keys(updates).length) return;
+      const cur = ensurePlan(list?.plan);
+      const nextSnaps = { ...cur.placeSnapshots };
+      let changed = false;
+      for (const [id, url] of Object.entries(updates)) {
+        if (nextSnaps[id] && !nextSnaps[id].photoUrl) {
+          nextSnaps[id] = { ...nextSnaps[id], photoUrl: url };
+          changed = true;
+        }
+      }
+      if (changed) apply({ ...cur, placeSnapshots: nextSnaps });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan.placeSnapshots, liveById, list?.destination]);
 
   // Precomputed set of placeIds present in the plan. O(1) lookup per row in
   // the picker instead of an O(days × phases × sessions) scan via isPlacePlanned().
@@ -281,10 +329,10 @@ export default function PlanMode({ list }) {
           liveDataByCategory={liveDataByCategory}
           tabLoading={tabLoading}
           fetchTabIfNeeded={fetchTabIfNeeded}
-          isSavedFn={(id) => isWishlisted(id)}
+          isSavedFn={(place) => isWishlisted(place)}
           onToggleSave={(place, category) => {
-            if (isWishlisted(place.placeId)) {
-              removePlaceFromWishlist(place.placeId);
+            if (isWishlisted(place)) {
+              removePlaceFromWishlist(place);
             } else {
               addPlaceToWishlist(place, category);
             }
@@ -308,10 +356,10 @@ export default function PlanMode({ list }) {
           hotels={liveDataByCategory.hotels || []}
           hotelsLoading={!!tabLoading?.hotels}
           fetchTabIfNeeded={fetchTabIfNeeded}
-          isSavedFn={(id) => isWishlisted(id)}
+          isSavedFn={(place) => isWishlisted(place)}
           onToggleSave={(place) => {
-            if (isWishlisted(place.placeId)) {
-              removePlaceFromWishlist(place.placeId);
+            if (isWishlisted(place)) {
+              removePlaceFromWishlist(place);
             } else {
               addPlaceToWishlist(place, 'hotels');
             }
@@ -444,6 +492,19 @@ function DayBlock({
 
 function SessionCard({ session, place, onChange, onRemove }) {
   const mins = durationMinutes(session.startTime, session.endTime);
+  // Tap-to-edit: time + expense render as plain text (no clipping boxes) and
+  // only swap to an input on tap. 'start' | 'end' | 'expense' | null.
+  const [editing, setEditing] = useState(null);
+  const editRef = useRef(null);
+
+  useEffect(() => {
+    const el = editRef.current;
+    if (!el) return;
+    el.focus();
+    // Open the native time picker straight away when editing a time field.
+    if (editing === 'start' || editing === 'end') el.showPicker?.();
+  }, [editing]);
+
   return (
     <div className="plan-session">
       {place?.photoUrl && (
@@ -471,225 +532,75 @@ function SessionCard({ session, place, onChange, onRemove }) {
           <div className="plan-session-addr">{place.address}</div>
         )}
         <div className="plan-session-row">
-          <input
-            className="plan-inline-input"
-            type="time"
-            value={session.startTime}
-            onChange={(e) => onChange({ startTime: e.target.value })}
-            aria-label="Start time"
-          />
-          <span className="plan-inline-sep">→</span>
-          <input
-            className="plan-inline-input"
-            type="time"
-            value={session.endTime}
-            onChange={(e) => onChange({ endTime: e.target.value })}
-            aria-label="End time"
-          />
-          <span className="plan-inline-dur">{formatDuration(mins)}</span>
-          <input
-            className="plan-inline-input plan-inline-expense"
-            type="text"
-            inputMode="decimal"
-            placeholder="₹"
-            value={session.expense || ''}
-            onChange={(e) => onChange({ expense: e.target.value })}
-            aria-label="Expense"
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const LightPickerRow = memo(function LightPickerRow({ place, category, planned, selected, saved, onToggleSave, onPick, showCategoryChip }) {
-  const tab = TAB_BY_KEY[category];
-  const description = place.wiki?.extract || place.summary;
-  const truncatedDesc = description?.length > 110
-    ? description.slice(0, 110).trim() + '…'
-    : description;
-  return (
-    <div
-      className={`plan-modal-row light ${selected ? 'selected' : ''} ${planned ? 'planned' : ''}`}
-    >
-      <button type="button" className="plan-modal-row-body" onClick={onPick}>
-        {place.photoUrl ? (
-          <img
-            className="plan-modal-row-photo"
-            src={place.photoUrl}
-            alt=""
-            loading="lazy"
-            onError={(e) => (e.currentTarget.style.display = 'none')}
-          />
-        ) : (
-          <div className="plan-modal-row-photo placeholder" aria-hidden />
-        )}
-        <div className="plan-modal-row-main">
-          <div className="plan-modal-row-name">{place.name}</div>
-          {truncatedDesc && (
-            <div className="plan-modal-row-meta">{truncatedDesc}</div>
-          )}
-          <div className="plan-modal-row-foot">
-            {place.rating != null && (
-              <span className="plan-modal-row-rating">
-                ★ {place.rating}
-                {place.reviewCount > 0 && (
-                  <span className="plan-modal-row-reviews">({formatCount(place.reviewCount)})</span>
-                )}
-              </span>
-            )}
-            {showCategoryChip && tab && (
-              <span className="plan-modal-row-cat-chip" style={{ color: tab.color, borderColor: tab.color + '55', background: tab.color + '14' }}>
-                <tab.Icon size={11} strokeWidth={2} aria-hidden />
-                {tab.label}
-              </span>
-            )}
-            {planned && (
-              <span className="plan-modal-row-in-plan">
-                <Check size={11} strokeWidth={2.25} aria-hidden />
-                In plan
-              </span>
-            )}
-            {selected && !planned && (
-              <span className="plan-modal-row-in-plan">
-                <Check size={11} strokeWidth={2.25} aria-hidden />
-                Chosen
-              </span>
-            )}
-          </div>
-        </div>
-      </button>
-      <button
-        type="button"
-        className={`picker-fav-toggle ${saved ? 'on' : ''}`}
-        onClick={(e) => { e.stopPropagation(); onToggleSave(); }}
-        aria-pressed={saved}
-        aria-label={saved ? 'Remove from wishlist' : 'Save to wishlist'}
-        title={saved ? 'Saved to wishlist (tap to remove)' : 'Save to wishlist'}
-      >
-        <Heart size={14} strokeWidth={2} fill={saved ? 'currentColor' : 'none'} aria-hidden />
-      </button>
-    </div>
-  );
-}, (prev, next) =>
-  prev.place === next.place &&
-  prev.category === next.category &&
-  prev.planned === next.planned &&
-  prev.selected === next.selected &&
-  prev.saved === next.saved &&
-  prev.showCategoryChip === next.showCategoryChip
-);
-
-function PlacePickerModalImpl({
-  plannedSet,
-  tabs,
-  initialTab,
-  liveDataByCategory,
-  tabLoading,
-  fetchTabIfNeeded,
-  isSavedFn,
-  onToggleSave,
-  onClose,
-  onPick,
-  title,
-}) {
-  const [activePill, setActivePill] = useState(initialTab);
-  const [query, setQuery] = useState('');
-
-  useEffect(() => {
-    if (!fetchTabIfNeeded) return;
-    if (liveDataByCategory[activePill] == null) fetchTabIfNeeded(activePill);
-  }, [activePill, fetchTabIfNeeded, liveDataByCategory]);
-
-  const data = liveDataByCategory[activePill];
-  const loading = !!tabLoading?.[activePill] && (data == null || data.length === 0);
-
-  const filtered = useMemo(() => {
-    const list = data || [];
-    const q = query.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter(
-      (p) => p.name?.toLowerCase().includes(q) || p.address?.toLowerCase().includes(q)
-    );
-  }, [data, query]);
-
-  return (
-    <div className="plan-modal-overlay" onClick={onClose}>
-      <div className="plan-modal" onClick={(e) => e.stopPropagation()} role="dialog">
-        <div className="plan-modal-head">
-          <div className="plan-modal-title">{title}</div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
-            <X size={14} strokeWidth={2} />
-          </button>
-        </div>
-        <div className="picker-pill-row" role="tablist" aria-label="Browse by category">
-          {tabs.map((t) => {
-            const isActive = activePill === t.key;
-            return (
-              <button
-                key={t.key}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                title={t.label}
-                className={`picker-pill ${isActive ? 'active' : ''}`}
-                style={isActive ? {
-                  color: t.color,
-                  borderColor: t.color + '55',
-                  background: t.color + '14',
-                } : undefined}
-                onClick={() => setActivePill(t.key)}
-              >
-                <t.Icon size={14} strokeWidth={2} aria-hidden color={isActive ? t.color : 'currentColor'} />
-                {isActive && <span>{t.label}</span>}
-              </button>
-            );
-          })}
-        </div>
-        <input
-          className="input plan-modal-search"
-          placeholder="Filter…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <div className="plan-modal-list">
-          {loading ? (
-            <div className="muted" style={{ padding: 16, textAlign: 'center' }}>
-              Loading {TAB_BY_KEY[activePill]?.label?.toLowerCase()}…
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="muted" style={{ padding: 16, textAlign: 'center' }}>
-              {(data || []).length === 0 ? 'Nothing in this category yet.' : 'No matches.'}
-            </div>
+          {editing === 'start' ? (
+            <input
+              ref={editRef}
+              className="plan-inline-input"
+              type="time"
+              value={session.startTime}
+              onChange={(e) => onChange({ startTime: e.target.value })}
+              onBlur={() => setEditing(null)}
+              aria-label="Start time"
+            />
           ) : (
-            filtered.map((p) => (
-              <LightPickerRow
-                key={p.placeId}
-                place={p}
-                category={activePill}
-                planned={plannedSet.has(p.placeId)}
-                saved={isSavedFn(p.placeId)}
-                onToggleSave={() => onToggleSave(p, activePill)}
-                onPick={() => onPick({ place: p, category: activePill })}
-                showCategoryChip
-              />
-            ))
+            <button
+              type="button"
+              className="plan-time-text"
+              onClick={() => setEditing('start')}
+              aria-label={`Start time ${session.startTime || 'not set'}, tap to edit`}
+            >
+              {session.startTime || '--:--'}
+            </button>
+          )}
+          <span className="plan-inline-sep">→</span>
+          {editing === 'end' ? (
+            <input
+              ref={editRef}
+              className="plan-inline-input"
+              type="time"
+              value={session.endTime}
+              onChange={(e) => onChange({ endTime: e.target.value })}
+              onBlur={() => setEditing(null)}
+              aria-label="End time"
+            />
+          ) : (
+            <button
+              type="button"
+              className="plan-time-text"
+              onClick={() => setEditing('end')}
+              aria-label={`End time ${session.endTime || 'not set'}, tap to edit`}
+            >
+              {session.endTime || '--:--'}
+            </button>
+          )}
+          <span className="plan-inline-dur">{formatDuration(mins)}</span>
+          {editing === 'expense' ? (
+            <input
+              ref={editRef}
+              className="plan-inline-input plan-inline-expense"
+              type="text"
+              inputMode="decimal"
+              placeholder="₹"
+              value={session.expense || ''}
+              onChange={(e) => onChange({ expense: e.target.value })}
+              onBlur={() => setEditing(null)}
+              aria-label="Expense"
+            />
+          ) : (
+            <button
+              type="button"
+              className="plan-price-text"
+              onClick={() => setEditing('expense')}
+              aria-label={`Expense ${session.expense ? `₹${session.expense}` : 'not set'}, tap to edit`}
+            >
+              {session.expense ? `₹${session.expense}` : '₹—'}
+            </button>
           )}
         </div>
       </div>
     </div>
   );
 }
-
-const PlacePickerModal = memo(PlacePickerModalImpl, (p, n) =>
-  p.plannedSet === n.plannedSet &&
-  p.tabs === n.tabs &&
-  p.initialTab === n.initialTab &&
-  p.liveDataByCategory === n.liveDataByCategory &&
-  p.tabLoading === n.tabLoading &&
-  p.isSavedFn === n.isSavedFn &&
-  p.title === n.title
-);
 
 function HotelPickerModalImpl({
   plan,
@@ -755,7 +666,7 @@ function HotelPickerModalImpl({
                   place={p}
                   category="hotels"
                   selected={selected}
-                  saved={isSavedFn(p.placeId)}
+                  saved={isSavedFn(p)}
                   onToggleSave={() => onToggleSave(p)}
                   onPick={() => onPick({ place: p })}
                 />

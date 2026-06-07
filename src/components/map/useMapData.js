@@ -1,51 +1,34 @@
 import { useCallback, useMemo } from 'react';
-import { reverseGeocodeCity } from '../../services/googleMaps';
-import { useTrip } from '../../hooks/useTrip';
+import { useTripSearch, useTripSearchHere } from '../../hooks/useTrip';
 import { useSearchStore } from '../../stores/searchStore';
 import { useMapStore } from '../../stores/mapStore';
-import { useWishlistStore } from '../../stores/wishlistStore';
 import { useTabQuery } from '../../hooks/queries/useTabQuery';
-import { useNearbyQuery } from '../../hooks/queries/useNearbyQuery';
 import { useViewportQuery } from '../../hooks/queries/useViewportQuery';
+import { gridSpread } from './helpers';
+import { GRID_CELLS } from './constants';
 
 // Provider-agnostic data + callback assembly for map renderers.
 // Returns everything a renderer needs to draw markers + wire actions, without
 // touching any Google/Mapbox-specific APIs.
 export function useMapData() {
-  const { selectPlace, clearViewportItems, search } = useTrip();
+  const selectPlace = useSearchStore((s) => s.selectPlace);
+  const clearViewportItems = useMapStore((s) => s.clearViewportItems);
+  const search = useTripSearch();
+  const searchHere = useTripSearchHere();
 
   const loading = useSearchStore((s) => s.loading);
   const selectedPlaceId = useSearchStore((s) => s.selectedPlaceId);
-  const nearbyAnchor = useMapStore((s) => s.nearbyAnchor);
-  const selectedHotelId = useMapStore((s) => s.selectedHotelId);
   const viewportTarget = useMapStore((s) => s.viewportTarget);
 
-  // Pin tap → full city navigation for the pin's locality.
-  //   1. selectPlace: opens detail card + dispatches map focus event.
-  //   2. reverseGeocodeCity: resolves pin's city.
-  //   3. Instant UI sync: ghostCity (wishlist chip) + viewportCity (Save label).
-  //   4. search(): refetches tabs + weather + events for the new city.
-  //      - skipRecents: pin taps don't pollute the recents list.
-  //      - preserveSelection: keep the tapped place + its category tab active.
+  // Pin tap → highlight the matching drawer row + switch to that pin's
+  // category tab. Does NOT open the detail card and does NOT pan the map
+  // (the pin is already on screen). The user opens the detail card by then
+  // tapping the highlighted row in the drawer.
   const onPinTap = useCallback(
     (poi, category) => {
-      selectPlace(poi, category);
-      if (!Number.isFinite(poi?.lat) || !Number.isFinite(poi?.lng)) return;
-      reverseGeocodeCity({ lat: poi.lat, lng: poi.lng })
-        .then((city) => {
-          if (!city) return;
-          const wishlistStore = useWishlistStore.getState();
-          if (wishlistStore.ghostCity !== city) wishlistStore.setGhostCity(city);
-          const mapStore = useMapStore.getState();
-          if (mapStore.viewportCity !== city) mapStore.setViewportCity(city);
-          const searchSnap = useSearchStore.getState();
-          if (searchSnap.destination !== city) {
-            search({ destination: city, skipRecents: true, preserveSelection: true });
-          }
-        })
-        .catch(() => {});
+      selectPlace(poi, category, { pan: false, openDetail: false });
     },
-    [selectPlace, search]
+    [selectPlace]
   );
 
   const { data: tabActivities } = useTabQuery('activities');
@@ -64,20 +47,6 @@ export function useMapData() {
     [tabActivities, tabRestaurants, tabNature, tabGems, tabHotels]
   );
 
-  const { data: nearbyAct } = useNearbyQuery({ anchor: nearbyAnchor, category: 'activities' });
-  const { data: nearbyRest } = useNearbyQuery({ anchor: nearbyAnchor, category: 'restaurants' });
-  const { data: nearbyNat } = useNearbyQuery({ anchor: nearbyAnchor, category: 'nature' });
-  const { data: nearbyGems } = useNearbyQuery({ anchor: nearbyAnchor, category: 'gems' });
-  const nearbyItems = useMemo(
-    () => ({
-      activities: nearbyAct ?? null,
-      restaurants: nearbyRest ?? null,
-      nature: nearbyNat ?? null,
-      gems: nearbyGems ?? null
-    }),
-    [nearbyAct, nearbyRest, nearbyNat, nearbyGems]
-  );
-
   const { data: vpAct } = useViewportQuery({ target: viewportTarget, category: 'activities' });
   const { data: vpRest } = useViewportQuery({ target: viewportTarget, category: 'restaurants' });
   const { data: vpNat } = useViewportQuery({ target: viewportTarget, category: 'nature' });
@@ -94,8 +63,9 @@ export function useMapData() {
     };
   }, [viewportTarget, vpAct, vpRest, vpNat, vpGems, vpHotels]);
 
-  // Click "Search here" → search the current map-center location.
-  const handleSearchHereClick = useCallback(() => {
+  // City-wide text search of the current map-center location's city/area.
+  // Used as the fallback when the user is zoomed out past BOX_SEARCH_MIN_ZOOM.
+  const cityWideSearch = useCallback(() => {
     const { placeArea, placeCity, destination } = useSearchStore.getState();
     const parts = [placeArea, placeCity].filter(Boolean);
     const override = parts.length ? parts.join(', ') : destination;
@@ -103,34 +73,47 @@ export function useMapData() {
     search({ destination: override });
   }, [search]);
 
-  const actionsDisabled = loading || !!nearbyAnchor;
+  // Box search: search ONLY the supplied visible-viewport rectangle.
+  // Reuses useTrip.searchHere (via the lightweight search context) for free
+  // weather-target + city-label updates; falls back to refreshViewport if the
+  // search context is unavailable.
+  const boxSearchHere = useCallback(
+    ({ lat, lng, bounds }) => {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      if (searchHere) searchHere({ lat, lng, bounds });
+      else useMapStore.getState().refreshViewport({ lat, lng, bounds });
+    },
+    [searchHere]
+  );
 
-  const anchorHotel = useMemo(() => {
-    if (nearbyAnchor) return nearbyAnchor;
-    return tabData.hotels?.find((h) => h.placeId === selectedHotelId) || null;
-  }, [nearbyAnchor, tabData.hotels, selectedHotelId]);
+  const actionsDisabled = loading;
 
-  // Source priority: nearby > viewport (all 4 cats) > city-wide tabData
+  // Source priority: viewport (all cats) > city-wide tabData.
+  // Declutter is centralized HERE so all renderers benefit and stop slicing:
+  //  - viewport mode → grid-cap spread within the viewport bounds, capped at 5
+  //  - city mode     → first 5
   const markersForCat = useCallback(
     (cat) => {
-      if (nearbyAnchor) return nearbyItems[cat] || [];
-      if (viewportItems) return viewportItems[cat] || [];
-      return tabData[cat] || [];
+      if (viewportItems) {
+        const items = viewportItems[cat] || [];
+        const bounds = viewportTarget?.bounds;
+        return bounds ? gridSpread(items, bounds, GRID_CELLS, 1, 5) : items.slice(0, 5);
+      }
+      return (tabData[cat] || []).slice(0, 5);
     },
-    [nearbyAnchor, nearbyItems, viewportItems, tabData]
+    [viewportItems, viewportTarget, tabData]
   );
 
   return {
     loading,
     selectedPlaceId,
-    nearbyAnchor,
     viewportTarget,
     viewportItems,
     tabData,
-    anchorHotel,
     markersForCat,
     onPinTap,
-    handleSearchHereClick,
+    cityWideSearch,
+    boxSearchHere,
     clearViewportItems,
     actionsDisabled
   };

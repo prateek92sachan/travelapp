@@ -5,13 +5,17 @@ import {
   browserLocalPersistence,
   GoogleAuthProvider,
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
   signOut,
   onAuthStateChanged,
   browserPopupRedirectResolver,
 } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from 'firebase/firestore';
+import { getFunctions as _getFunctions, httpsCallable } from 'firebase/functions';
 
 // Use the current origin as authDomain when on a Firebase-Hosting domain so
 // the OAuth redirect handler runs same-origin (avoids Chrome 117+ storage
@@ -36,11 +40,23 @@ const firebaseConfig = {
 let _app = null;
 let _auth = null;
 let _db = null;
+let _functions = null;
+
+const APPCHECK_SITE_KEY = import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY;
 
 function ensureApp() {
   if (_app) return _app;
   if (!firebaseConfig.apiKey) throw new Error('Firebase not configured — set VITE_FIREBASE_* env vars');
   _app = initializeApp(firebaseConfig);
+  // App Check (reCAPTCHA v3) — attests prod requests to Firestore + Functions.
+  // Skipped in dev: reCAPTCHA has no token for localhost and the debug-token
+  // flow would otherwise abort local Firestore calls.
+  if (APPCHECK_SITE_KEY && import.meta.env.PROD) {
+    initializeAppCheck(_app, {
+      provider: new ReCaptchaV3Provider(APPCHECK_SITE_KEY),
+      isTokenAutoRefreshEnabled: true,
+    });
+  }
   return _app;
 }
 
@@ -56,8 +72,24 @@ export function getAuth() {
 }
 
 export function getDb() {
-  if (!_db) _db = getFirestore(ensureApp());
+  if (!_db) {
+    // IndexedDB-backed offline cache: synced wishlists/plans stay readable
+    // offline and cold reads serve from cache. Multi-tab manager so several
+    // open tabs share one persistence lease without conflict.
+    _db = initializeFirestore(ensureApp(), {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    });
+  }
   return _db;
 }
 
-export { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, browserPopupRedirectResolver };
+export function getFunctions() {
+  if (!_functions) _functions = _getFunctions(ensureApp(), 'us-central1');
+  return _functions;
+}
+
+export function callable(name) {
+  return httpsCallable(getFunctions(), name);
+}
+
+export { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, browserPopupRedirectResolver };

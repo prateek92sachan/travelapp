@@ -1,29 +1,37 @@
 import { haversineKm } from '../../utils/geo';
-import { DENSITY_RADIUS_KM } from './constants';
+import { DENSITY_RADIUS_KM, BOX_INSET_FRAC, GRID_CELLS } from './constants';
+import { useWishlistStore } from '../../stores/wishlistStore';
+import { useMapStore } from '../../stores/mapStore';
 
-// Polygon ring approximating a geodesic circle around `center` with radius
-// `radiusKm`. Used by MapboxMapInner to draw the proximity ring (no turf dep).
-export function geodesicCirclePolygon(center, radiusKm, steps = 64) {
-  const coords = [];
-  const earthRadiusKm = 6371;
-  const angular = radiusKm / earthRadiusKm;
-  const latRad = (center.lat * Math.PI) / 180;
-  const lngRad = (center.lng * Math.PI) / 180;
-  for (let i = 0; i <= steps; i++) {
-    const bearing = (i / steps) * 2 * Math.PI;
-    const lat2 = Math.asin(
-      Math.sin(latRad) * Math.cos(angular) +
-        Math.cos(latRad) * Math.sin(angular) * Math.cos(bearing)
-    );
-    const lng2 =
-      lngRad +
-      Math.atan2(
-        Math.sin(bearing) * Math.sin(angular) * Math.cos(latRad),
-        Math.cos(angular) - Math.sin(latRad) * Math.sin(lat2)
-      );
-    coords.push([(lng2 * 180) / Math.PI, (lat2 * 180) / Math.PI]);
+// Shared pan handler: given a reverse-geocoded place name + locality
+// ({ name, country }), derive the { area, city } chip labels, push them via
+// setPlaceDisplay, and sync the wishlist ghost city + map viewport city.
+// Used by all three map renderers' pan watchers and useTrip's viewport effect
+// (previously duplicated ~25 lines in each). No-op when both inputs are empty.
+export function applyPannedPlace({ name, locality }, setPlaceDisplay) {
+  const localityName = locality?.name || null;
+  if (!name && !localityName) return;
+  let area = name || localityName || '';
+  let city = '';
+  if (name) {
+    const parts = name.split(',').map((s) => s.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      area = parts[0];
+      city = parts[1];
+    } else if (parts.length === 1) {
+      area = parts[0];
+      if (localityName && localityName.toLowerCase() !== parts[0].toLowerCase()) {
+        city = localityName;
+      }
+    }
   }
-  return { type: 'Polygon', coordinates: [coords] };
+  setPlaceDisplay({ area, city });
+  if (localityName) {
+    const ws = useWishlistStore.getState();
+    if (ws.ghostCity !== localityName) ws.setGhostCity(localityName, locality.country);
+    const ms = useMapStore.getState();
+    if (ms.viewportCity !== localityName) ms.setViewportCity(localityName, locality.country);
+  }
 }
 
 // Centroid of the densest pin cluster within DENSITY_RADIUS_KM.
@@ -43,4 +51,66 @@ export function densestCentroid(pins) {
   const lat = cluster.reduce((s, p) => s + p.lat, 0) / cluster.length;
   const lng = cluster.reduce((s, p) => s + p.lng, 0) / cluster.length;
   return { lat, lng };
+}
+
+// Shrink a { low:{lat,lng}, high:{lat,lng} } rectangle inward by `frac` on
+// each side, so pins near the visible edge stay comfortably inside the box.
+// Returns the bounds unchanged when they're missing/malformed.
+export function insetBounds(bounds, frac = BOX_INSET_FRAC) {
+  if (!bounds || !bounds.low || !bounds.high) return bounds;
+  const { low, high } = bounds;
+  const dLat = (high.lat - low.lat) * frac;
+  const dLng = (high.lng - low.lng) * frac;
+  return {
+    low: { lat: low.lat + dLat, lng: low.lng + dLng },
+    high: { lat: high.lat - dLat, lng: high.lng - dLng }
+  };
+}
+
+// Grid-cap declutter: distribute pins across a cells x cells grid over the
+// given bounds, keeping at most `capPerCell` per cell so pins don't bunch.
+// `items` is assumed pre-sorted by popularity (input order = priority).
+// Returns up to `max` items. No marker-cluster bubbles — pure spread.
+export function gridSpread(items, bounds, cells = GRID_CELLS, capPerCell = 1, max = 5) {
+  if (!items || items.length === 0) return [];
+  if (!bounds || !bounds.low || !bounds.high || items.length <= max) {
+    return items.slice(0, max);
+  }
+
+  const { low, high } = bounds;
+  const EPS = 1e-9;
+  const latSpan = (high.lat - low.lat) || EPS;
+  const lngSpan = (high.lng - low.lng) || EPS;
+
+  const counts = new Map(); // cellKey -> count
+  const picked = [];
+  const overflow = [];
+
+  for (const item of items) {
+    if (picked.length >= max) break;
+    if (!Number.isFinite(item?.lat) || !Number.isFinite(item?.lng)) continue;
+
+    let cx = Math.floor(((item.lng - low.lng) / lngSpan) * cells);
+    let cy = Math.floor(((item.lat - low.lat) / latSpan) * cells);
+    cx = Math.min(cells - 1, Math.max(0, cx));
+    cy = Math.min(cells - 1, Math.max(0, cy));
+    const key = `${cx},${cy}`;
+
+    const count = counts.get(key) || 0;
+    if (count < capPerCell) {
+      counts.set(key, count + 1);
+      picked.push(item);
+    } else {
+      overflow.push(item);
+    }
+  }
+
+  if (picked.length < max) {
+    for (const item of overflow) {
+      if (picked.length >= max) break;
+      picked.push(item);
+    }
+  }
+
+  return picked.slice(0, max);
 }

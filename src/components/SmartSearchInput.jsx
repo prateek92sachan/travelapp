@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { fetchPlacePredictions, newSessionToken } from '../services/googleMaps';
+import { fetchPlacePredictions, newSessionToken } from '../services/locationService';
 import { getRecentTrips } from '../utils/recentTrips';
 
 const POPULAR_DESTINATIONS = [

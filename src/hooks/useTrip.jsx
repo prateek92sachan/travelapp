@@ -8,11 +8,10 @@ import {
   useState
 } from 'react';
 import {
-  geocodeDestination,
   reverseGeocodeCity,
-  reverseGeocodePlaceName,
-  clearViewportCache
-} from '../services/googleMaps';
+  reverseGeocodePlaceName
+} from '../services/locationService';
+import { geocodeDestination, clearViewportCache } from '../services/placesProvider';
 import { fetchWeather, fetchLastYearWeather } from '../services/weather';
 import {
   saveRecentTrip,
@@ -34,13 +33,17 @@ import { useSearchStore } from '../stores/searchStore';
 import { queryClient } from '../lib/queryClient';
 import { weatherKey, lastYearWeatherKey, useCurrentWeather, useLastYearWeather } from './queries/useWeather';
 import { TAB_KEYS, tabQueryKey, buildTabQueryFn, useTabQuery } from './queries/useTabQuery';
-import { NEARBY_CATEGORIES, useNearbyQuery } from './queries/useNearbyQuery';
 import { VIEWPORT_CATEGORIES, useViewportQuery } from './queries/useViewportQuery';
 import { useEvents, eventsKey } from './queries/useEvents';
 import { fetchAnnualEvents } from '../services/events';
 import { useAuth } from './useAuth';
 
 const TripContext = createContext(null);
+// Dedicated, minimal context for `search` — the only useTrip field that
+// can't trivially be read from a zustand store. Consumers that only need
+// `search` subscribe here and avoid re-rendering on unrelated TripContext
+// state changes.
+const TripSearchContext = createContext(null);
 
 // Re-export TAB_KEYS so existing consumers keep working without changing imports.
 export { TAB_KEYS };
@@ -88,6 +91,7 @@ export function TripProvider({ children }) {
     ]
   );
   const activeTab = useSearchStore((s) => s.activeTab);
+  const searchRadiusMeters = useSearchStore((s) => s.searchRadiusMeters);
   const loading = useSearchStore((s) => s.loading);
   const error = useSearchStore((s) => s.error);
   const selectedPlaceId = useSearchStore((s) => s.selectedPlaceId);
@@ -103,47 +107,24 @@ export function TripProvider({ children }) {
   const setError = useSearchStore((s) => s.setError);
   const setSelectedPlaceId = useSearchStore((s) => s.setSelectedPlaceId);
   const setSelectedPlace = useSearchStore((s) => s.setSelectedPlace);
+  const setDetailPlaceId = useSearchStore((s) => s.setDetailPlaceId);
+  const setDetailPlace = useSearchStore((s) => s.setDetailPlace);
   // Snapshot URL params once for the auto-search useEffect below
   const initialRef = useRef({ destination, date });
   const wishlist = useWishlistStore((s) => s.wishlist);
 
   // ---- Map layer state ----------------------------------------------------
   // mapStore owns map-mode state so single-domain consumers (MapControlsPanel,
-  // HotelInfoCard, NearbyModeIndicator, TransitLayer) can subscribe directly.
+  // TransitLayer) can subscribe directly.
   const mapType = useMapStore((s) => s.mapType);
   const setMapType = useMapStore((s) => s.setMapType);
   const transitOn = useMapStore((s) => s.transitOn);
   const setTransitOn = useMapStore((s) => s.setTransitOn);
-  const selectedHotelId = useMapStore((s) => s.selectedHotelId);
-  const setSelectedHotelId = useMapStore((s) => s.setSelectedHotelId);
-  const nearbyAnchor = useMapStore((s) => s.nearbyAnchor);
-  const setNearbyAnchor = useMapStore((s) => s.setNearbyAnchor);
   const viewportTarget = useMapStore((s) => s.viewportTarget);
   const setViewportTarget = useMapStore((s) => s.setViewportTarget);
   const viewportCity = useMapStore((s) => s.viewportCity);
   const setViewportCity = useMapStore((s) => s.setViewportCity);
-  const selectHotel = useMapStore((s) => s.selectHotel);
-  const exitNearbyMode = useMapStore((s) => s.exitNearbyMode);
   const refreshViewport = useMapStore((s) => s.refreshViewport);
-
-  const nearbyActQ = useNearbyQuery({ anchor: nearbyAnchor, category: 'activities' });
-  const nearbyRestQ = useNearbyQuery({ anchor: nearbyAnchor, category: 'restaurants' });
-  const nearbyNatQ = useNearbyQuery({ anchor: nearbyAnchor, category: 'nature' });
-  const nearbyGemsQ = useNearbyQuery({ anchor: nearbyAnchor, category: 'gems' });
-  const nearbyItems = useMemo(
-    () => ({
-      activities: nearbyActQ.data ?? null,
-      restaurants: nearbyRestQ.data ?? null,
-      nature: nearbyNatQ.data ?? null,
-      gems: nearbyGemsQ.data ?? null
-    }),
-    [nearbyActQ.data, nearbyRestQ.data, nearbyNatQ.data, nearbyGemsQ.data]
-  );
-  const nearbyLoading =
-    nearbyActQ.isFetching ||
-    nearbyRestQ.isFetching ||
-    nearbyNatQ.isFetching ||
-    nearbyGemsQ.isFetching;
 
   // ---- Viewport refresh state --------------------------------------------
   // viewportTarget controls the five useViewportQuery hooks. Null = no viewport
@@ -192,8 +173,9 @@ export function TripProvider({ children }) {
       reverseGeocodeCity({ lat, lng }).catch(() => null)
     ]).then(([name, locality]) => {
       if (seq !== placeResolveSeq.current) return;
-      if (!name && !locality) return;
-      let area = name || locality || '';
+      const localityName = locality?.name || null;
+      if (!name && !localityName) return;
+      let area = name || localityName || '';
       let city = '';
       if (name) {
         const parts = name.split(',').map((s) => s.trim()).filter(Boolean);
@@ -202,17 +184,17 @@ export function TripProvider({ children }) {
           city = parts[1];
         } else if (parts.length === 1) {
           area = parts[0];
-          if (locality && locality.toLowerCase() !== parts[0].toLowerCase()) {
-            city = locality;
+          if (localityName && localityName.toLowerCase() !== parts[0].toLowerCase()) {
+            city = localityName;
           }
         }
       }
       setPlaceDisplay({ area, city });
       // Sync wishlist ghost city + viewport city label on every viewport change
-      if (locality) {
+      if (localityName) {
         const ws = useWishlistStore.getState();
-        if (ws.ghostCity !== locality) ws.setGhostCity(locality);
-        if (viewportCity !== locality) setViewportCity(locality);
+        if (ws.ghostCity !== localityName) ws.setGhostCity(localityName, locality.country);
+        if (viewportCity !== localityName) setViewportCity(localityName, locality.country);
       }
     });
   }, [viewportTarget?.lat, viewportTarget?.lng, setPlaceDisplay, viewportCity, setViewportCity]);
@@ -225,6 +207,70 @@ export function TripProvider({ children }) {
     if (date) u.searchParams.set('date', date);
     window.history.replaceState({}, '', u.toString());
   }, [destination, date]);
+
+  // One-time geo reconcile for pre-existing wishlist lists (Plan + Saved):
+  //   (a) backfill `country` for city-only destinations created before we
+  //       tracked it;
+  //   (b) roll up sub-locality names (e.g. "1st arrondissement" → "Paris")
+  //       created when Mapbox reverse-geocode returned the most-specific area.
+  // Runs on mount and whenever the lists change (so cloud-synced lists are
+  // covered too). Each pass keeps its own persisted attempted-destination set
+  // so every city is geocoded at most once ever — no repeat billing on reload.
+  useEffect(() => {
+    // country-tried-v2: v1 ran before geocode exposed a country field.
+    const COUNTRY_KEY = 'travel-app:wishlist:country-tried-v2';
+    const ROLLUP_KEY = 'travel-app:wishlist:rollup-tried-v1';
+    const readTried = (k) => {
+      try { return JSON.parse(localStorage.getItem(k)) || []; } catch { return []; }
+    };
+    const writeTried = (k, keys) => {
+      try { localStorage.setItem(k, JSON.stringify([...new Set(keys)])); } catch {}
+    };
+
+    let running = false;
+    let disposed = false;
+    const run = async () => {
+      if (running || disposed) return;
+      const lists = useWishlistStore.getState().wishlist.lists || [];
+      const countryTried = new Set(readTried(COUNTRY_KEY));
+      const rollupTried = new Set(readTried(ROLLUP_KEY));
+      const needsCountry = lists.some(
+        (l) => !l.country && l.destination && !countryTried.has(l.destination.trim().toLowerCase())
+      );
+      const needsRollup = lists.some(
+        (l) => l.destination && !rollupTried.has(l.destination.trim().toLowerCase())
+      );
+      if (!needsCountry && !needsRollup) return;
+      running = true;
+      try {
+        if (needsRollup) {
+          const { attempted } = await useWishlistStore
+            .getState()
+            .rollupSubLocalities(geocodeDestination, [...rollupTried]);
+          if (attempted.length) writeTried(ROLLUP_KEY, [...rollupTried, ...attempted]);
+        }
+        if (needsCountry) {
+          const tried = readTried(COUNTRY_KEY);
+          const { attempted } = await useWishlistStore
+            .getState()
+            .backfillCountries(geocodeDestination, tried);
+          if (attempted.length) writeTried(COUNTRY_KEY, [...tried, ...attempted]);
+        }
+      } finally {
+        running = false;
+      }
+    };
+
+    run();
+    let prevLists = useWishlistStore.getState().wishlist.lists;
+    const unsub = useWishlistStore.subscribe((s) => {
+      if (s.wishlist.lists !== prevLists) {
+        prevLists = s.wishlist.lists;
+        run();
+      }
+    });
+    return () => { disposed = true; unsub(); };
+  }, []);
 
   // On sign-in: migrate legacy v3 blob → v4 subcollections (one-shot, idempotent),
   // hydrate local stores from cloud, then install per-mutation cloud writers.
@@ -383,11 +429,12 @@ export function TripProvider({ children }) {
         setPlaceDisplay({ area: '', city: '' });
         // Clear events query so old destination's events don't linger.
         queryClient.removeQueries({ queryKey: ['events'] });
-        if (!preserveSelection) setSelectedHotelId(null);
 
-        // Exit nearby-mode and clear viewport overrides on new search
-        setNearbyAnchor(null);
+        // Clear viewport overrides on new search. viewportCity is a pan-
+        // exploration artifact — reset it too so the "Save to <city>" target
+        // doesn't keep showing the previously-panned city after searching anew.
         setViewportTarget(null);
+        setViewportCity(null, null);
         // Wipe the API-level viewport cache too — old city's data is irrelevant
         clearViewportCache();
       }
@@ -450,8 +497,12 @@ export function TripProvider({ children }) {
         }
 
         // Phase 1 (in parallel): current weather + activities (default tab).
-        // fetchQuery both seeds the cache (so hook subscribers render) and
-        // returns the value so we can persist it to localStorage.
+        // On a silent refresh (mount restore / pin-tap reroute) we already have
+        // fresh cached activities seeded into the query cache, so use a long
+        // staleTime to serve them instead of re-billing a Text Search. An
+        // explicit search keeps staleTime 0 so the user gets fresh data.
+        // Weather is free (Open-Meteo), so always refetch it.
+        const placesStaleTime = silentRefresh ? 30 * 24 * 60 * 60 * 1000 : 0;
         const activitiesKey = tabQueryKey({
           tabKey: 'activities',
           destination: dest,
@@ -459,7 +510,9 @@ export function TripProvider({ children }) {
           lng: geo.lng,
           radiusMeters: radius
         });
-        const [w, acts] = await Promise.all([
+        // fetchQuery seeds the query cache (hook subscribers render); the
+        // persistence effect below mirrors the full tabData to localStorage.
+        await Promise.all([
           queryClient.fetchQuery({
             queryKey: weatherKey(weatherTarget),
             queryFn: () => fetchWeather(weatherTarget),
@@ -474,7 +527,7 @@ export function TripProvider({ children }) {
               lng: geo.lng,
               radiusMeters: radius
             }),
-            staleTime: 0
+            staleTime: placesStaleTime
           })
         ]);
         if (myReq !== requestSeq.current) return;
@@ -485,13 +538,6 @@ export function TripProvider({ children }) {
           // cloud call needed here anymore.
           saveRecentTrip({ destination: dest, date: dt, formattedAddress: geo.formattedAddress });
         }
-
-        // Persist Phase 1 immediately so restore shows activities + weather instantly.
-        setCachedPlaces(dest, dt, {
-          coords: geo,
-          tabData: { activities: acts, restaurants: null, nature: null, gems: null, hotels: null },
-          weather: w,
-        });
 
         // Phase 2: background — last-year weather + events only.
         // Tab prefetch removed (Fix 3): restaurants/nature/gems/hotels now
@@ -523,6 +569,21 @@ export function TripProvider({ children }) {
   );
 
 
+  // Mirror the full set of fetched tabs (with Wiki thumbnails already swapped
+  // in) + weather to localStorage whenever they change. On the next load,
+  // restore seeds these into the query cache so the silent refresh serves them
+  // instead of re-billing Places Text Search + Photo calls. Replaces the old
+  // activities-only write that left lazy tabs to refetch on every reload.
+  useEffect(() => {
+    if (!destination || !coords) return;
+    setCachedPlaces(destination, date, {
+      coords,
+      tabData,
+      weather,
+      searchRadiusMeters,
+    });
+  }, [destination, date, coords, tabData, weather, searchRadiusMeters]);
+
   // Auto-search on mount if URL had params.
   // If a fresh cache hit exists, pre-populate state immediately so the UI
   // renders instantly, then re-fetch silently in the background.
@@ -532,9 +593,12 @@ export function TripProvider({ children }) {
     const cached = getCachedPlaces(initialRef.current.destination, initialRef.current.date);
     if (cached) {
       setCoords(cached.coords);
-      // Compute the radius that would have been used (we didn't persist it).
-      // Falls back to default — the silent refresh that follows will overwrite it.
-      const radius = useSearchStore.getState().searchRadiusMeters;
+      // Use the persisted radius so the seeded query keys match what the silent
+      // refresh recomputes (same destination → same geocode → same radius).
+      // Without this the seed landed under the default-radius key and was
+      // orphaned, forcing a refetch. Falls back to the store default.
+      const radius = cached.searchRadiusMeters || useSearchStore.getState().searchRadiusMeters;
+      setSearchRadius(radius);
       // Seed tab query cache from localStorage so UI renders cached items instantly.
       if (cached.tabData && cached.coords) {
         TAB_KEYS.forEach((tabKey) => {
@@ -570,6 +634,11 @@ export function TripProvider({ children }) {
         if (place) {
           setSelectedPlaceId(ui.selectedPlaceId);
           setSelectedPlace(place);
+          // Restore detail card too — the persisted selection represents
+          // "what the user was last looking at" rather than a pin-only
+          // highlight, so re-open the card on reload.
+          setDetailPlaceId(ui.selectedPlaceId);
+          setDetailPlace(place);
           // Re-open mobile drawer after React renders the restored state
           requestAnimationFrame(() => {
             window.dispatchEvent(new CustomEvent('travelapp:openPlaces'));
@@ -653,10 +722,10 @@ export function TripProvider({ children }) {
     [activeWishlistId, wishlist]
   );
 
-  // ---- Hotel nearby + viewport modes --------------------------------------
-  // selectHotel, exitNearbyMode, refreshViewport are exposed by mapStore and
-  // subscribed at the top of this provider. clearViewportItems wraps the store
-  // action because it also dispatches a pan-to-city event.
+  // ---- Viewport mode ------------------------------------------------------
+  // refreshViewport is exposed by mapStore and subscribed at the top of this
+  // provider. clearViewportItems wraps the store action because it also
+  // dispatches a pan-to-city event.
   const clearViewportItems = useCallback(() => {
     useMapStore.getState().clearViewportTarget();
     const c = useSearchStore.getState().coords;
@@ -673,41 +742,35 @@ export function TripProvider({ children }) {
   const searchHere = useCallback(
     async ({ lat, lng, radiusMeters, bounds }) => {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-      if (nearbyAnchor) return;
       setWeatherTarget({ lat, lng, dateISO: useSearchStore.getState().date });
       refreshViewport({ lat, lng, radiusMeters, bounds });
       const city = await reverseGeocodeCity({ lat, lng }).catch(() => null);
-      if (city) {
-        setViewportCity(city);
+      if (city?.name) {
+        setViewportCity(city.name, city.country);
         // Update ghost so the wishlist's + Add button + ghost chip track
         // the panned-to city live.
-        useWishlistStore.getState().setGhostCity(city);
+        useWishlistStore.getState().setGhostCity(city.name, city.country);
       }
     },
-    [nearbyAnchor, refreshViewport, setWeatherTarget, setViewportCity]
+    [refreshViewport, setWeatherTarget, setViewportCity]
   );
 
   // Derive: items for the currently-active tab. Map widget reads from this.
   // Priority order:
-  //   1. Nearby-mode items (hotel selected)        → "near this hotel"
-  //   2. Viewport items (user has zoomed/panned)   → "in this area"
-  //   3. Normal tab data                            → "in this city"
+  //   1. Viewport items (user has zoomed/panned)   → "in this area"
+  //   2. Normal tab data                            → "in this city"
   const activeTabItems = useMemo(() => {
     if (!TAB_KEYS.includes(activeTab)) return [];
-    if (nearbyAnchor) return nearbyItems[activeTab] || [];
     if (viewportItems) return viewportItems[activeTab] || [];
     return tabData[activeTab] || [];
-  }, [nearbyAnchor, nearbyItems, viewportItems, tabData, activeTab]);
+  }, [viewportItems, tabData, activeTab]);
 
   // Loading state should reflect whichever data source is currently active.
   const activeTabLoading = useMemo(
     () =>
       TAB_KEYS.includes(activeTab) &&
-      ((nearbyAnchor && nearbyLoading) ||
-        viewportLoading ||
-        tabLoading[activeTab] ||
-        false),
-    [activeTab, nearbyAnchor, nearbyLoading, viewportLoading, tabLoading]
+      (viewportLoading || tabLoading[activeTab] || false),
+    [activeTab, viewportLoading, tabLoading]
   );
 
   const value = useMemo(
@@ -751,11 +814,6 @@ export function TripProvider({ children }) {
       setMapType,
       transitOn,
       setTransitOn,
-      selectedHotelId,
-      selectHotel,
-      nearbyAnchor,
-      nearbyLoading,
-      exitNearbyMode,
       viewportItems,
       viewportLoading,
       refreshViewport,
@@ -798,11 +856,6 @@ export function TripProvider({ children }) {
       viewportCity,
       mapType,
       transitOn,
-      selectedHotelId,
-      selectHotel,
-      nearbyAnchor,
-      nearbyLoading,
-      exitNearbyMode,
       viewportItems,
       viewportLoading,
       refreshViewport,
@@ -811,11 +864,34 @@ export function TripProvider({ children }) {
     ]
   );
 
-  return <TripContext.Provider value={value}>{children}</TripContext.Provider>;
+  const searchCtx = useMemo(() => ({ search, searchHere }), [search, searchHere]);
+
+  return (
+    <TripSearchContext.Provider value={searchCtx}>
+      <TripContext.Provider value={value}>{children}</TripContext.Provider>
+    </TripSearchContext.Provider>
+  );
 }
 
 export function useTrip() {
   const ctx = useContext(TripContext);
   if (!ctx) throw new Error('useTrip must be used inside TripProvider');
   return ctx;
+}
+
+// Returns just `search`. Subscribers do NOT re-render when other TripContext
+// fields change — prefer this over `useTrip().search` in new code.
+export function useTripSearch() {
+  const ctx = useContext(TripSearchContext);
+  if (!ctx) throw new Error('useTripSearch must be used inside TripProvider');
+  return ctx.search;
+}
+
+// Returns just `searchHere` (box/viewport search with free weather + city-label
+// updates). Lives on the lightweight search context so subscribers do NOT
+// re-render when other TripContext fields change.
+export function useTripSearchHere() {
+  const ctx = useContext(TripSearchContext);
+  if (!ctx) throw new Error('useTripSearchHere must be used inside TripProvider');
+  return ctx.searchHere;
 }

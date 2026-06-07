@@ -2,14 +2,29 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Access is allowlisted: the signed-in user's verified email must have
+    // a doc at allowlist/{email}. Manage entries in the Firebase Console.
+    function isAllowed() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && exists(/databases/$(database)/documents/allowlist/$(request.auth.token.email));
+    }
+
+    // A user may read only their own allowlist entry (lets the client show
+    // an "access" state). No client writes — seed/manage via console/admin.
+    match /allowlist/{email} {
+      allow read: if request.auth != null && request.auth.token.email == email;
+      allow write: if false;
+    }
+
     // Owner-only access to the parent user doc AND every subcollection
     // beneath it (savedLists, planLists, items, recentTrips, etc.).
     // The {document=**} wildcard cascades the rule to all depths.
     match /users/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if request.auth != null && request.auth.uid == userId && isAllowed();
     }
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if request.auth != null && request.auth.uid == userId && isAllowed();
     }
 
     match /{document=**} {

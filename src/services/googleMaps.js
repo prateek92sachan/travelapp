@@ -2,6 +2,10 @@
 // All calls go through the JS SDK once the map is loaded; geocoding uses REST.
 
 import { GOOGLE_MAPS_KEY } from './config';
+import { loadCache, makeSaver, clearCache, makeRevGeoCache } from '../utils/persistentCache';
+import { fetchWithRetry } from '../utils/fetchRetry';
+import { rectFromCenterRadius, distanceMeters } from './geo';
+import { NOISE_TYPES, popularityScore, isWorthShowing, shapePlace } from './placeRanking';
 
 /**
  * Geocode a destination string -> { lat, lng, formattedAddress, name, types, isCountry }.
@@ -19,7 +23,7 @@ export async function geocodeDestination(destination) {
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
-  const res = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+  const res = await fetchWithRetry(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
   if (!res.ok) throw new Error(`Geocoding failed: ${res.status}`);
   const data = await res.json();
 
@@ -33,10 +37,13 @@ export async function geocodeDestination(destination) {
   const r = data.results[0];
   const types = r.types || [];
   const vp = r.geometry.viewport;
+  const country =
+    (r.address_components || []).find((c) => (c.types || []).includes('country'))?.long_name || null;
   return {
     lat: r.geometry.location.lat,
     lng: r.geometry.location.lng,
     formattedAddress: r.formatted_address,
+    country,
     name: destination,
     placeId: r.place_id,
     types,
@@ -59,44 +66,29 @@ export async function geocodeDestination(destination) {
 // Quantize coords to ~110m buckets so near-identical calls hit the cache.
 // TTL 30 min — these names don't change quickly. See milestone Fix 5.
 
-const REV_GEO_CACHE = new Map();
-const REV_GEO_TTL_MS = 30 * 60 * 1000;
-const REV_GEO_BUCKET = 0.001; // ≈ 110 m at the equator
-const REV_GEO_MAX = 200;
+// Hydrated from localStorage so reverse-geocode labels survive a reload.
+// Namespace -en: reverse-geocode requests language=en; old localized entries
+// are ignored rather than served stale. Shared machinery: makeRevGeoCache.
+const { get: revGeoGet, set: revGeoSet } = makeRevGeoCache('revgeo-en', { ttlMs: 30 * 24 * 60 * 60 * 1000 });
 
-function revGeoKey(kind, lat, lng) {
-  const q = (n) => (Math.round(n / REV_GEO_BUCKET) * REV_GEO_BUCKET).toFixed(3);
-  return `${kind}:${q(lat)}:${q(lng)}`;
+// Old cache entries stored a bare city string; new ones store
+// { name, country }. Normalize so consumers always get the object shape.
+function asCityInfo(v) {
+  if (v == null) return null;
+  if (typeof v === 'string') return { name: v, country: null };
+  return v;
 }
 
-function revGeoGet(kind, lat, lng) {
-  const key = revGeoKey(kind, lat, lng);
-  const hit = REV_GEO_CACHE.get(key);
-  if (!hit) return undefined;
-  if (Date.now() - hit.time > REV_GEO_TTL_MS) {
-    REV_GEO_CACHE.delete(key);
-    return undefined;
-  }
-  return hit.value;
-}
-
-function revGeoSet(kind, lat, lng, value) {
-  const key = revGeoKey(kind, lat, lng);
-  REV_GEO_CACHE.set(key, { value, time: Date.now() });
-  if (REV_GEO_CACHE.size > REV_GEO_MAX) {
-    REV_GEO_CACHE.delete(REV_GEO_CACHE.keys().next().value);
-  }
-}
-
-// Reverse geocode a lat/lng to a city name (locality or admin level 2).
-// Returns null on failure — always safe to ignore.
+// Reverse geocode a lat/lng to { name, country } (locality or admin level 2 +
+// country). Returns null on failure — always safe to ignore.
 export async function reverseGeocodeCity({ lat, lng }) {
   const cached = revGeoGet('city', lat, lng);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) return asCityInfo(cached);
   const url =
     `https://maps.googleapis.com/maps/api/geocode/json` +
     `?latlng=${lat},${lng}` +
     `&result_type=locality|administrative_area_level_2` +
+    `&language=en` +
     `&key=${GOOGLE_MAPS_KEY}`;
   try {
     const controller = new AbortController();
@@ -108,7 +100,13 @@ export async function reverseGeocodeCity({ lat, lng }) {
     const components = data.results[0].address_components || [];
     const locality = components.find((c) => c.types.includes('locality'));
     const level2 = components.find((c) => c.types.includes('administrative_area_level_2'));
-    const value = locality?.long_name || level2?.long_name || null;
+    const country = components.find((c) => c.types.includes('country'));
+    const name = locality?.long_name || level2?.long_name || null;
+    if (!name) {
+      revGeoSet('city', lat, lng, null);
+      return null;
+    }
+    const value = { name, country: country?.long_name || null };
     revGeoSet('city', lat, lng, value);
     return value;
   } catch {
@@ -127,6 +125,7 @@ export async function reverseGeocodePlaceName({ lat, lng }) {
     `https://maps.googleapis.com/maps/api/geocode/json` +
     `?latlng=${lat},${lng}` +
     `&result_type=neighborhood|sublocality|locality|administrative_area_level_2` +
+    `&language=en` +
     `&key=${GOOGLE_MAPS_KEY}`;
   try {
     const controller = new AbortController();
@@ -162,55 +161,6 @@ export async function reverseGeocodePlaceName({ lat, lng }) {
   }
 }
 
-/**
- * Find the most prominent nearby city for display purposes.
- *
- * Uses Places Text Search with a "city" query biased to the given coords.
- * Google ranks by prominence so for a town like "Hulu Langat" near KL
- * this returns Kuala Lumpur (the famous metro it belongs to), not just
- * the destination itself. Returns null on failure.
- *
- * `excludeName` lets the caller skip results that match the destination
- * (case-insensitive), so a search for "Tokyo" doesn't return "Tokyo" as
- * the parent city.
- */
-export async function fetchProminentNearbyCity({ lat, lng, excludeName = '' } = {}) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
-    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': GOOGLE_MAPS_KEY,
-        'X-Goog-FieldMask': 'places.displayName'
-      },
-      body: JSON.stringify({
-        textQuery: 'city',
-        locationBias: {
-          circle: { center: { latitude: lat, longitude: lng }, radius: 50000 }
-        },
-        maxResultCount: 5
-      })
-    }).finally(() => clearTimeout(timer));
-    if (!res.ok) return null;
-    const data = await res.json();
-    const places = data.places || [];
-    const exclude = excludeName.trim().toLowerCase();
-    for (const p of places) {
-      const name = p.displayName?.text;
-      if (!name) continue;
-      if (exclude && name.toLowerCase() === exclude) continue;
-      return name;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 // ---- Places (New) Text Search ---------------------------------------------
 
 const PLACES_FIELD_MASK = [
@@ -241,22 +191,28 @@ async function placesTextSearch({ textQuery, lat, lng, radiusMeters, fetchCount,
       textQuery,
       maxResultCount: fetchCount
     };
-    if (bounds) {
+    // Prefer a hard rectangle restriction. Explicit `bounds` (viewport
+    // search) wins; otherwise derive one from center+radius so category
+    // searches can't leak strong name-matches far outside the area.
+    const rect = bounds || rectFromCenterRadius(lat, lng, radiusMeters);
+    if (rect) {
       body.locationRestriction = {
         rectangle: {
-          low:  { latitude: bounds.low.lat,  longitude: bounds.low.lng  },
-          high: { latitude: bounds.high.lat, longitude: bounds.high.lng }
+          low:  { latitude: rect.low.lat,  longitude: rect.low.lng  },
+          high: { latitude: rect.high.lat, longitude: rect.high.lng }
         }
       };
     } else {
+      // No usable coords — soft bias only (last resort).
       body.locationBias = {
         circle: {
           center: { latitude: lat, longitude: lng },
-          radius: radiusMeters
+          // Google searchText caps circle.radius at 50000m.
+          radius: Math.min(50000, Math.max(1, radiusMeters))
         }
       };
     }
-    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    const res = await fetchWithRetry('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
       signal: controller.signal,
       headers: {
@@ -306,63 +262,21 @@ const ATTRACTION_TYPES = new Set([
   'scenic_spot'
 ]);
 
-const NOISE_TYPES = new Set([
-  'lodging',
-  'real_estate_agency',
-  'gas_station',
-  'atm',
-  'bank',
-  'pharmacy',
-  'convenience_store',
-  'parking',
-  'storage'
-]);
+// ---- Tab-search disk cache ------------------------------------------------
+//
+// Tab results (Activities/Restaurants/Nature/Gems/Hotels) were cached only
+// in TanStack's in-memory store, so every reload / PWA relaunch re-billed each
+// tab's Enterprise Text Search. Disk-back them like the viewport cache so a
+// fresh tab reuses a recent session's result. Key quantizes the city-center
+// coords (~1.1km bucket) + radius + limit, so micro-jitter and repeat searches
+// of the same place collapse onto one entry. Each hit = one billed search avoided.
+const TAB_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const TAB_CACHE = loadCache('tabsearch', TAB_TTL_MS);
+const persistTabs = makeSaver('tabsearch', { max: 200, getTime: (v) => v.time });
 
-/**
- * Score = rating × log10(reviewCount + 1).
- * This balances quality (a 4.9 rating is meaningful) with popularity
- * (a place with 50,000 reviews is more "real" than one with 12), without
- * letting either dominate.
- */
-function popularityScore(p) {
-  const rating = p.rating ?? 0;
-  const count = p.userRatingCount ?? 0;
-  return rating * Math.log10(count + 1);
-}
-
-/**
- * Returns true if the place looks like a legitimate attraction worth
- * surfacing. Filters out noise, low-rated, and under-reviewed entries.
- */
-function isWorthShowing(p, { minRating = 4.0, minReviews = 50 } = {}) {
-  const types = p.types || [];
-  if (types.some((t) => NOISE_TYPES.has(t))) return false;
-  if ((p.rating ?? 0) < minRating) return false;
-  if ((p.userRatingCount ?? 0) < minReviews) return false;
-  return true;
-}
-
-/**
- * Map a raw Places API response to our app's POI / activity shape.
- */
-function shapePlace(p) {
-  const types = p.types || [];
-  return {
-    placeId: p.id,
-    name: p.displayName?.text || 'Unnamed place',
-    address: p.formattedAddress,
-    lat: p.location?.latitude,
-    lng: p.location?.longitude,
-    rating: p.rating,
-    reviewCount: p.userRatingCount ?? 0,
-    types,
-    summary: deriveSummaryFromTypes(types, p.displayName?.text || ''),
-    estCost: estimateCost(types),
-    estDuration: estimateDuration(types),
-    photoUrl: p.photos?.[0]?.name
-      ? `https://places.googleapis.com/v1/${p.photos[0].name}/media?maxHeightPx=400&maxWidthPx=600&key=${GOOGLE_MAPS_KEY}`
-      : null
-  };
+function tabSearchKey({ textQuery, lat, lng, radiusMeters, limit }) {
+  const q = (n) => (Number.isFinite(n) ? quantize(n).toFixed(2) : 'na');
+  return `${textQuery}|${q(lat)}|${q(lng)}|${radiusMeters}|${limit}`;
 }
 
 // ---- Public: generic helper used by category fetchers ---------------------
@@ -381,13 +295,34 @@ async function fetchAndRank({
   filterOpts,
   customFilter
 }) {
-  const raw = await placesTextSearch({
+  const cacheKey = tabSearchKey({ textQuery, lat, lng, radiusMeters, limit });
+  const cached = TAB_CACHE.get(cacheKey);
+  if (cached && Date.now() - cached.time < TAB_TTL_MS) {
+    return cached.data;
+  }
+
+  const rawAll = await placesTextSearch({
     textQuery,
     lat,
     lng,
     radiusMeters,
     fetchCount
   });
+
+  // Exact-circle trim: the hard rectangle restriction is square, so its
+  // corners reach ~1.41× radius. Drop anything beyond radiusMeters from the
+  // center so a strong name-match in the corner (e.g. a far outlier pin)
+  // can't survive. No-op when coords/radius missing.
+  const canTrim =
+    Number.isFinite(lat) && Number.isFinite(lng) && radiusMeters > 0;
+  const raw = canTrim
+    ? rawAll.filter((p) => {
+        const plat = p.location?.latitude;
+        const plng = p.location?.longitude;
+        if (!Number.isFinite(plat) || !Number.isFinite(plng)) return false;
+        return distanceMeters(lat, lng, plat, plng) <= radiusMeters;
+      })
+    : rawAll;
 
   const filterFn = customFilter
     ? customFilter
@@ -400,31 +335,22 @@ async function fetchAndRank({
     .map(shapePlace);
 
   // Fallback: if filters eliminated everything, drop them and just rank
-  if (filtered.length === 0) {
-    return raw
-      .sort((a, b) => popularityScore(b) - popularityScore(a))
-      .slice(0, limit)
-      .map(shapePlace);
-  }
-  return filtered;
-}
+  const result =
+    filtered.length === 0
+      ? raw
+          .sort((a, b) => popularityScore(b) - popularityScore(a))
+          .slice(0, limit)
+          .map(shapePlace)
+      : filtered;
 
-// ---- Public: fetch top POIs (used by Map widget for markers) --------------
-
-export async function fetchTopPOIs({ destination, lat, lng, radiusMeters = 20000, limit = 10 }) {
-  return fetchAndRank({
-    textQuery: `top tourist attractions in ${destination}`,
-    lat,
-    lng,
-    radiusMeters,
-    limit,
-    filterOpts: { minRating: 4.0, minReviews: 50 }
-  });
+  TAB_CACHE.set(cacheKey, { data: result, time: Date.now() });
+  persistTabs(TAB_CACHE);
+  return result;
 }
 
 // ---- Public: tab-specific fetchers ----------------------------------------
 
-export async function fetchTopActivities({ destination, lat, lng, radiusMeters = 20000, limit = 10 }) {
+export async function fetchTopActivities({ destination, lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchAndRank({
     textQuery: `things to do and activities in ${destination}`,
     lat,
@@ -435,7 +361,7 @@ export async function fetchTopActivities({ destination, lat, lng, radiusMeters =
   });
 }
 
-export async function fetchTopRestaurants({ destination, lat, lng, radiusMeters = 20000, limit = 10 }) {
+export async function fetchTopRestaurants({ destination, lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchAndRank({
     textQuery: `best restaurants in ${destination}`,
     lat,
@@ -446,7 +372,7 @@ export async function fetchTopRestaurants({ destination, lat, lng, radiusMeters 
   });
 }
 
-export async function fetchTopNatureUnique({ destination, lat, lng, radiusMeters = 20000, limit = 10 }) {
+export async function fetchTopNatureUnique({ destination, lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchAndRank({
     textQuery: `natural attractions parks scenic spots and unique places in ${destination}`,
     lat,
@@ -462,10 +388,8 @@ export async function fetchTopNatureUnique({ destination, lat, lng, radiusMeters
  * layer (toggleable) — NOT a tab. Hotels live exclusively on the map so
  * users can spatially evaluate "where should I stay relative to attractions?"
  *
- * Higher fetch limit (15) than other categories — map can comfortably
- * display more lodging markers without losing density.
  */
-export async function fetchTopHotels({ destination, lat, lng, radiusMeters = 20000, limit = 15 }) {
+export async function fetchTopHotels({ destination, lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchAndRank({
     textQuery: `top hotels in ${destination}`,
     lat,
@@ -494,7 +418,7 @@ export async function fetchTopHotels({ destination, lat, lng, radiusMeters = 200
  * bound filters out the obvious top-of-mind spots that would already be in
  * the Activities tab.
  */
-export async function fetchHiddenGems({ destination, lat, lng, radiusMeters = 20000, limit = 10 }) {
+export async function fetchHiddenGems({ destination, lat, lng, radiusMeters = 20000, limit = 5 }) {
   return fetchAndRank({
     textQuery: `hidden gems and lesser-known places in ${destination}`,
     lat,
@@ -512,123 +436,12 @@ export async function fetchHiddenGems({ destination, lat, lng, radiusMeters = 20
   });
 }
 
-// ---- Heuristics for activity metadata -------------------------------------
-
-function estimateCost(types = []) {
-  const t = new Set(types);
-  if (t.has('park') || t.has('natural_feature') || t.has('hiking_area') || t.has('beach'))
-    return 'Free';
-  if (t.has('museum') || t.has('art_gallery') || t.has('zoo') || t.has('aquarium'))
-    return '$$';
-  if (t.has('amusement_park') || t.has('observation_deck')) return '$$$';
-  if (t.has('restaurant') || t.has('cafe') || t.has('bar')) return '$$';
-  return '$$';
-}
-
-function estimateDuration(types = []) {
-  const t = new Set(types);
-  if (t.has('amusement_park') || t.has('zoo') || t.has('aquarium'))
-    return 'Half day';
-  if (t.has('museum') || t.has('art_gallery')) return '2-3 hrs';
-  if (t.has('park') || t.has('hiking_area') || t.has('beach')) return '1-3 hrs';
-  if (t.has('restaurant') || t.has('cafe') || t.has('bar')) return '1-2 hrs';
-  return '2 hrs';
-}
-
-function deriveSummaryFromTypes(types, name) {
-  if (!types?.length) return `Visit ${name}.`;
-  const friendly = types
-    .filter((t) => !['point_of_interest', 'establishment'].includes(t))
-    .slice(0, 3)
-    .map((t) => t.replace(/_/g, ' '))
-    .join(' / ');
-  return friendly ? `${friendly}` : `Visit ${name}.`;
-}
-
 /**
  * Build a "Get directions" Google Maps URL — opens in a new tab.
  */
 export function directionsUrl({ lat, lng, name }) {
   const dest = encodeURIComponent(`${name} @${lat},${lng}`);
   return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
-}
-
-// ---- Place Details (New) -------------------------------------------------
-
-const PLACE_DETAILS_CACHE = new Map();
-const detailsInFlight = new Map();
-
-const PRICE_LEVEL_MAP = {
-  PRICE_LEVEL_FREE: 'Free',
-  PRICE_LEVEL_INEXPENSIVE: '$',
-  PRICE_LEVEL_MODERATE: '$$',
-  PRICE_LEVEL_EXPENSIVE: '$$$',
-  PRICE_LEVEL_VERY_EXPENSIVE: '$$$$'
-};
-
-/**
- * Fetch rich details for a single place: hours, phone, website, reviews,
- * price level, editorial summary, and extra photos.
- * Results are cached for the session; concurrent calls for the same placeId
- * share one in-flight request instead of racing.
- */
-export async function fetchPlaceDetails(placeId) {
-  if (PLACE_DETAILS_CACHE.has(placeId)) return PLACE_DETAILS_CACHE.get(placeId);
-  if (detailsInFlight.has(placeId)) return detailsInFlight.get(placeId);
-
-  const fields = [
-    'currentOpeningHours',
-    'internationalPhoneNumber',
-    'websiteUri',
-    'reviews',
-    'photos',
-    'priceLevel',
-    'editorialSummary'
-  ].join(',');
-
-  const promise = (async () => {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000);
-      const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
-        headers: {
-          'X-Goog-Api-Key': GOOGLE_MAPS_KEY,
-          'X-Goog-FieldMask': fields
-        },
-        signal: controller.signal
-      }).finally(() => clearTimeout(timer));
-
-      if (!res.ok) throw new Error(`Place details ${res.status}`);
-      const data = await res.json();
-
-      const details = {
-        openNow: data.currentOpeningHours?.openNow ?? null,
-        weekdayHours: data.currentOpeningHours?.weekdayDescriptions || [],
-        phone: data.internationalPhoneNumber || null,
-        website: data.websiteUri || null,
-        priceLevel: PRICE_LEVEL_MAP[data.priceLevel] || null,
-        editorialSummary: data.editorialSummary?.text || null,
-        reviews: (data.reviews || []).slice(0, 3).map((r) => ({
-          author: r.authorAttribution?.displayName || 'Anonymous',
-          rating: r.rating ?? null,
-          text: r.text?.text || '',
-          time: r.relativePublishTimeDescription || ''
-        })),
-        extraPhotos: (data.photos || []).slice(1, 4).map(
-          (p) =>
-            `https://places.googleapis.com/v1/${p.name}/media?maxHeightPx=400&maxWidthPx=600&key=${GOOGLE_MAPS_KEY}`
-        )
-      };
-
-      PLACE_DETAILS_CACHE.set(placeId, details);
-      return details;
-    } finally {
-      detailsInFlight.delete(placeId);
-    }
-  })();
-
-  detailsInFlight.set(placeId, promise);
-  return promise;
 }
 
 // ---- Viewport-aware fetching with cache -----------------------------------
@@ -641,23 +454,29 @@ export async function fetchPlaceDetails(placeId) {
 // tiny pan deltas all hit the same bucket. TTL 10 min — long enough that
 // re-pans feel snappy, short enough that "data freshness" stays believable.
 
-const VIEWPORT_CACHE = new Map();
-const VIEWPORT_TTL_MS = 10 * 60 * 1000; // 10 minutes
+// 30 days: panned-area place lists barely change (name/coords/rating are slow),
+// and we no longer fetch live hours/open-now, so staleness is low-risk. A long
+// window maximises cross-session reuse — each cache hit is one billed Places
+// Search call avoided.
+const VIEWPORT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const VIEWPORT_CACHE = loadCache('viewport', VIEWPORT_TTL_MS);
+const persistViewport = makeSaver('viewport', { max: 100, getTime: (v) => v.time });
 const COORD_BUCKET = 0.01; // ≈ 1.1 km at the equator
 
 function quantize(n) {
   return Math.round(n / COORD_BUCKET) * COORD_BUCKET;
 }
 
-function viewportCacheKey({ lat, lng, radiusMeters, category, bounds }) {
+function viewportCacheKey({ lat, lng, radiusMeters, category, bounds, limit }) {
+  const lim = Number.isFinite(limit) ? limit : 10;
   if (bounds) {
     // Rectangle-keyed: quantize corners to ~0.5km buckets so micro-jitter
     // (idle re-fires while map is settling) still hits the cache, but real
     // pans/zooms get a fresh key.
     const q = (n) => (Math.round(n / 0.005) * 0.005).toFixed(3);
-    return `rect:${q(bounds.low.lat)},${q(bounds.low.lng)}:${q(bounds.high.lat)},${q(bounds.high.lng)}:${category}`;
+    return `rect:${q(bounds.low.lat)},${q(bounds.low.lng)}:${q(bounds.high.lat)},${q(bounds.high.lng)}:${category}:${lim}`;
   }
-  return `${quantize(lat).toFixed(2)}:${quantize(lng).toFixed(2)}:${radiusMeters}:${category}`;
+  return `${quantize(lat).toFixed(2)}:${quantize(lng).toFixed(2)}:${radiusMeters}:${category}:${lim}`;
 }
 
 const CATEGORY_QUERIES = {
@@ -690,7 +509,7 @@ export async function fetchPlacesInViewport({
   limit = 10,
   bounds = null
 }) {
-  const key = viewportCacheKey({ lat, lng, radiusMeters, category, bounds });
+  const key = viewportCacheKey({ lat, lng, radiusMeters, category, bounds, limit });
   const now = Date.now();
 
   // Cache hit
@@ -752,6 +571,7 @@ export async function fetchPlacesInViewport({
       if (VIEWPORT_CACHE.size > 100) {
         VIEWPORT_CACHE.delete(VIEWPORT_CACHE.keys().next().value);
       }
+      persistViewport(VIEWPORT_CACHE);
       return data;
     } finally {
       inFlight.delete(key);
@@ -762,30 +582,11 @@ export async function fetchPlacesInViewport({
   return promise;
 }
 
-/**
- * Convenience: fetch top places within `radiusKm` of a single point.
- * Used by hotel-click "show me what's near here" mode.
- */
-export async function fetchPlacesNearPoint({
-  lat,
-  lng,
-  radiusKm = 2,
-  category = 'activities',
-  limit = 10
-}) {
-  return fetchPlacesInViewport({
-    lat,
-    lng,
-    radiusMeters: Math.round(radiusKm * 1000),
-    category,
-    limit
-  });
-}
-
 /** Manually clear the viewport cache (e.g. on new search). */
 export function clearViewportCache() {
   VIEWPORT_CACHE.clear();
   inFlight.clear();
+  clearCache('viewport');
 }
 
 // ---- Places Autocomplete (New) -------------------------------------------
@@ -831,14 +632,14 @@ export async function fetchPlacePredictions(input, { sessionToken, signal } = {}
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': GOOGLE_MAPS_KEY
       },
-      // NOTE: We deliberately omit `includedPrimaryTypes` here. Google Places
-      // Autocomplete (New) requires all values to come from a single type
-      // table (Table A or Table B). Mixing locality/country/tourist_attraction
-      // returns HTTP 400 INVALID_ARGUMENT. Letting Google rank by relevance
-      // gives the best results in practice.
+      // Destination search = cities/regions only. `(regions)` is a single
+      // allowed collection token (locality / admin areas / country), so it
+      // doesn't hit the "mixed type tables → 400" problem that listing
+      // individual types would. Keeps businesses/POIs out of the suggestions.
       body: JSON.stringify({
         input: trimmed,
-        sessionToken
+        sessionToken,
+        includedPrimaryTypes: ['(regions)']
       }),
       signal
     });

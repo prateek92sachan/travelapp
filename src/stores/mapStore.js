@@ -1,7 +1,8 @@
 import { create } from 'zustand';
+import { useSearchStore } from './searchStore';
 
 const PROVIDER_KEY = 'mapProvider';
-const VALID_PROVIDERS = new Set(['google', 'mapbox']);
+const VALID_PROVIDERS = new Set(['google', 'mapbox', 'tmap']);
 
 function readStoredProvider() {
   try {
@@ -35,10 +36,9 @@ export const useMapStore = create((set, get) => ({
   },
 
   // Map-mode state (where the map is "focused")
-  selectedHotelId: null, // null = no proximity ring
-  nearbyAnchor: null, // hotel that anchors nearby-mode; null = off
   viewportTarget: null, // { lat, lng, radiusMeters, bounds } | null
   viewportCity: null, // reverse-geocoded city name from last pan
+  viewportCountry: null, // reverse-geocoded country for the viewport city
 
   setMapProvider: (provider) => {
     if (!VALID_PROVIDERS.has(provider)) return;
@@ -63,30 +63,13 @@ export const useMapStore = create((set, get) => ({
       visibleCategories: { ...s.visibleCategories, [cat]: !s.visibleCategories[cat] }
     })),
 
-  setSelectedHotelId: (v) => set({ selectedHotelId: v }),
-  setNearbyAnchor: (v) => set({ nearbyAnchor: v }),
   setViewportTarget: (v) => set({ viewportTarget: v }),
-  setViewportCity: (v) => set({ viewportCity: v }),
+  setViewportCity: (v, country) =>
+    set(country === undefined ? { viewportCity: v } : { viewportCity: v, viewportCountry: country || null }),
 
-  // Click hotel → enter nearby mode (or exit if null passed).
-  selectHotel: (hotel) =>
-    set({
-      selectedHotelId: hotel?.placeId ?? null,
-      nearbyAnchor: hotel || null
-    }),
-
-  // Exit nearby mode + clear viewport overrides so user lands on city tabData.
-  exitNearbyMode: () =>
-    set({
-      selectedHotelId: null,
-      nearbyAnchor: null,
-      viewportTarget: null
-    }),
-
-  // Pan refresh — sets viewport target. Guarded against nearby-mode by caller.
+  // Pan refresh — sets viewport target.
   refreshViewport: ({ lat, lng, radiusMeters, bounds }) => {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    if (get().nearbyAnchor) return;
     set({
       viewportTarget: {
         lat,
@@ -98,5 +81,18 @@ export const useMapStore = create((set, get) => ({
   },
 
   // Clear viewport mode. Caller responsible for dispatching pan-to-city event.
-  clearViewportTarget: () => set({ viewportTarget: null, viewportCity: null })
+  clearViewportTarget: () => set({ viewportTarget: null, viewportCity: null }),
+
+  // Clears viewport target and signals the map to pan back to the searched
+  // city's coords. Wraps `clearViewportTarget` because the pan-to-city event
+  // is part of the same UX (exit "search here" mode → return to destination).
+  clearViewportItems: () => {
+    set({ viewportTarget: null, viewportCity: null, viewportCountry: null });
+    const c = useSearchStore.getState().coords;
+    if (c) {
+      window.dispatchEvent(
+        new CustomEvent('travelapp:panToCity', { detail: { lat: c.lat, lng: c.lng } })
+      );
+    }
+  }
 }));

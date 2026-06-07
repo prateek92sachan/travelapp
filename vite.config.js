@@ -84,6 +84,19 @@ export default defineConfig({
       },
     })
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        // Split heavyweight vendors out of the main bundle. mapbox-gl and the
+        // lazy globe already chunk on their own; this peels firebase + the
+        // react runtime off the ~970 kB entry chunk for better caching.
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/functions'],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     open: true,
